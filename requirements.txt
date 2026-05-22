@@ -1,0 +1,15 @@
+fastapi
+google-cloud-bigquery
+google-cloud-firestore
+google-cloud-secret-manager
+google-cloud-tasks
+gspread
+httpx
+pydantic
+pydantic-settings
+python-dotenv
+pyyaml
+requests
+rich
+pytest
+uvicorn
