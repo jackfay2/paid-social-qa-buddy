@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     # Worker runtime
     qa_worker_max_runtime_seconds: int = 900
 
+    # Sheets (gspread)
+    qa_sheets_auth_mode: str = "adc"  # "adc" | "service_account"
+    qa_sheets_worksheet_name: str = ""  # blank -> first sheet
+    google_sheets_service_account_file: str = ""
+    google_sheets_service_account_json: str = ""
+
 
 def load_settings() -> Settings:
     return Settings()

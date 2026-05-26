@@ -1,13 +1,26 @@
-"""FastAPI app entry point. Worker role only — listener lives in the Search repo."""
+"""FastAPI app entry point. Worker role only — the listener lives in Maya's repo.
+
+The /tasks/qa/run endpoint is invoked by the qa-buddy-runs-social Cloud Tasks
+queue. It parses the payload, runs orchestration under a timeout, posts the
+result to the Slack thread (idempotently), and returns. A run always ends with
+a clear outcome (handoff §5.4).
+"""
 
 from __future__ import annotations
 
 import logging
 import signal
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 
+from app.adapters.slack import SlackClient, SlackPostError
+from app.api import wiring
+from app.api.models import SocialTaskRequest, SocialTaskResponse
 from app.config import load_settings
+from app.core.orchestration import OrchestrationRequest, OrchestrationResult
 from app.logging_config import configure_logging
 
 _BOOT_SETTINGS = load_settings()
@@ -17,24 +30,17 @@ _LOGGER = logging.getLogger("paid_social_qa_buddy.worker")
 app = FastAPI(
     title="Paid Social QA Buddy — Meta Worker",
     description=(
-        "Meta-platform QA worker. Receives tasks from the qa-buddy-runs-social Cloud "
-        "Tasks queue (enqueued by the shared listener in Maya's repo), reads Meta data "
-        "from BigQuery, runs checks, writes results back to the QA sheet, and posts a "
-        "summary to the original Slack thread."
+        "Meta-platform QA worker. Receives tasks from the qa-buddy-runs-social "
+        "Cloud Tasks queue, reads Meta data from BigQuery, runs checks, writes "
+        "results to the QA sheet, and posts a summary to the Slack thread."
     ),
     version="0.1.0",
 )
 
 
 def _shutdown_handler(signum: int, frame: object) -> None:
-    """SIGTERM handler. 12-factor IX: maximize robustness via graceful shutdown."""
-    _LOGGER.info(
-        "shutdown_signal_received",
-        extra={"signal": signum, "stage": "lifecycle"},
-    )
-    # Cloud Run sends SIGTERM ~10 seconds before kill. Uvicorn handles connection
-    # draining; in-flight work should mark its run as interrupted in Firestore so
-    # Cloud Tasks can retry cleanly.
+    """SIGTERM handler. 12-factor IX: graceful shutdown on Cloud Run recycle."""
+    _LOGGER.info("shutdown_signal_received", extra={"signal": signum})
 
 
 signal.signal(signal.SIGTERM, _shutdown_handler)
@@ -55,21 +61,152 @@ def readyz() -> dict[str, object]:
             "bq_meta_project": settings.bq_meta_project,
             "polaris_api_url": settings.polaris_api_url,
             "qa_run_store_backend": settings.qa_run_store_backend,
+            "cloud_tasks_auth_required": settings.qa_cloud_tasks_auth_required,
         },
     }
 
 
-@app.post("/tasks/qa/run")
-def qa_run_task(request: Request) -> dict[str, str]:
-    """Stub worker endpoint. Real orchestration lands when adapters are wired."""
+@app.post("/tasks/qa/run", response_model=SocialTaskResponse)
+def qa_run_task(payload: SocialTaskRequest, request: Request) -> SocialTaskResponse:
+    settings = load_settings()
+    _verify_task_auth(request, settings)
+
+    service = wiring.build_orchestration_service(settings)
+    notifier = wiring.build_slack_client(settings)
+
+    orchestration_request = OrchestrationRequest(
+        request_id=payload.request_id,
+        account_id=payload.account_id,
+        campaign_id=payload.campaign_id,
+        campaign_name=payload.campaign_name,
+        sheet_url=payload.sheet_url,
+        thread_ts=payload.thread_ts,
+        channel_id=payload.channel_id,
+    )
+
+    result = _run_with_timeout(
+        service, orchestration_request, settings.qa_worker_max_runtime_seconds
+    )
+    if result is None:
+        _LOGGER.error(
+            "worker_timeout",
+            extra={"request_id": payload.request_id, "stage": "execution"},
+        )
+        # 500 so Cloud Tasks retries; orchestration dedup makes the retry safe.
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "retry",
+                "message": "Run exceeded worker max runtime; retry task.",
+                "request_id": payload.request_id,
+            },
+        )
+
+    _post_result_to_slack(service, notifier, payload, result)
+
+    return SocialTaskResponse(
+        status=result.status,
+        message=result.message,
+        run_id=result.run_id,
+        request_id=payload.request_id,
+        error_code=result.error_code,
+    )
+
+
+def _verify_task_auth(request: Request, settings) -> None:
+    """Cloud Tasks OIDC verification.
+
+    DEFERRED (pre-deploy task): real verification of the OIDC token against the
+    expected audience + service-account email via google.oauth2.id_token. Until
+    that lands, we refuse to run when auth is required rather than pretend the
+    endpoint is protected. Local runs set QA_CLOUD_TASKS_AUTH_REQUIRED=false.
+    """
+    if not settings.qa_cloud_tasks_auth_required:
+        return
     raise HTTPException(
-        status_code=501,
+        status_code=503,
         detail={
-            "error_code": "not_implemented",
+            "error_code": "task_auth_not_implemented",
             "message": (
-                "Worker scaffolded but orchestration is not wired yet. "
-                "Phase 1 implementation pending: BigQuery adapter, Polaris adapter, "
-                "check registry, sheet I/O, Slack notifier."
+                "Cloud Tasks OIDC verification is not implemented yet. "
+                "Set QA_CLOUD_TASKS_AUTH_REQUIRED=false for local runs, and "
+                "implement verification before deploying a public worker."
             ),
         },
     )
+
+
+def _run_with_timeout(
+    service, request: OrchestrationRequest, timeout_seconds: int
+) -> OrchestrationResult | None:
+    """Run orchestration in a worker thread with a hard timeout.
+
+    Returns None on timeout so the caller can ask Cloud Tasks to retry.
+    """
+    executor = ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(service.run, request)
+    try:
+        return future.result(timeout=max(int(timeout_seconds), 1))
+    except FuturesTimeout:
+        return None
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
+def _post_result_to_slack(
+    service, notifier: SlackClient | None, payload: SocialTaskRequest,
+    result: OrchestrationResult,
+) -> None:
+    """Post the run's terminal message to the Slack thread, idempotently.
+
+    Skips when there's no Slack client (local), no channel/thread, or the
+    notification was already sent for this request_id (Cloud Task retry). On a
+    transient Slack failure, raises so the task retries; a permanent failure is
+    logged (the run itself already completed).
+    """
+    if notifier is None:
+        _LOGGER.info(
+            "slack_post_skipped_no_token", extra={"request_id": payload.request_id}
+        )
+        return
+    if not payload.channel_id or not payload.thread_ts:
+        return
+
+    run_store = getattr(service, "run_store", None)
+    if run_store is not None and run_store.has_worker_notification(payload.request_id):
+        _LOGGER.info(
+            "slack_post_skipped_duplicate",
+            extra={"request_id": payload.request_id},
+        )
+        return
+
+    try:
+        notifier.post_thread_message(
+            channel_id=payload.channel_id,
+            thread_ts=payload.thread_ts,
+            text=result.message,
+        )
+        if run_store is not None:
+            run_store.mark_worker_notification(payload.request_id)
+        _LOGGER.info(
+            "slack_post_ok",
+            extra={"request_id": payload.request_id, "status": result.status},
+        )
+    except SlackPostError as exc:
+        if SlackClient.is_transient(exc):
+            _LOGGER.warning(
+                "slack_post_transient",
+                extra={"request_id": payload.request_id, "error": str(exc)},
+            )
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "status": "retry",
+                    "error_code": exc.code,
+                    "message": "Transient Slack post failure; retry task.",
+                },
+            ) from exc
+        _LOGGER.error(
+            "slack_post_terminal",
+            extra={"request_id": payload.request_id, "error": str(exc)},
+        )

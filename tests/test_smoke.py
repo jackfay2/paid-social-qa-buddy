@@ -32,10 +32,5 @@ def test_unknown_check_id_returns_error_verdict() -> None:
     assert "Unrecognized" in result.action
     assert result.check_id == "does_not_exist"
 
-
-def test_task_endpoint_returns_not_implemented_until_orchestration_lands() -> None:
-    client = TestClient(app)
-    response = client.post("/tasks/qa/run", json={})
-    assert response.status_code == 501
-    body = response.json()
-    assert body["detail"]["error_code"] == "not_implemented"
+# The /tasks/qa/run endpoint is now fully implemented; its behavior is covered
+# in tests/test_worker_endpoint.py.
