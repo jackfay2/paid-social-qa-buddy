@@ -11,6 +11,10 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from app.checks.meta_checks import (
+    check_campaign_buying_type,
+    check_campaign_objective,
+)
 from app.models import CheckResult, CheckRow
 
 CheckFunction = Callable[..., CheckResult]
@@ -18,12 +22,12 @@ CheckFunction = Callable[..., CheckResult]
 _logger = logging.getLogger("paid_social_qa_buddy.registry")
 
 CHECK_REGISTRY: dict[str, CheckFunction] = {
-    # Populated as check modules land. Pending Carrie's locked check_id list.
-    # Suggested organization (per the original handoff §7.2):
-    #   campaign/*   — bid_strategy, budget, optimization_event, objective, dates, special_ad_categories
-    #   ad_set/*     — audience, placements, age, geo, schedule
-    #   ad/*         — creative_format, headlines, primary_text, CTA, landing_url, UTM
-    #   text/*       — spellcheck, capitalization, promo_language, fair_housing (Gemini-batched)
+    # Campaign level (BigQuery-backed, fields confirmed present).
+    "campaign_objective": check_campaign_objective,
+    "campaign_buying_type": check_campaign_buying_type,
+    # More land as Kerri's check_ids lock and BigQuery fields arrive. Suggested
+    # organization (handoff §7.2): campaign / ad_set / ad / text (Gemini-batched).
+    # Checks for fields not yet in BigQuery return Review until the column lands.
 }
 
 
