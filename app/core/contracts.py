@@ -43,6 +43,9 @@ class RunRecord:
     error_count: int = 0
     error_codes: list[str] = field(default_factory=list)
     fix_items: list[str] = field(default_factory=list)
+    # Idempotency guard: set once the worker has posted the terminal Slack
+    # message, so Cloud Task retries don't double-post to the thread.
+    worker_notified: bool = False
 
 
 class SheetClient(Protocol):
