@@ -74,6 +74,17 @@ class MetaDataClient(Protocol):
     def get_ads(self, client_id: str, campaign_id: str) -> list[dict[str, Any]]: ...
 
 
+class AccountResolver(Protocol):
+    """Resolves a Meta account_id to a Wpromote client_id (the BQ dataset selector).
+
+    The incoming envelope carries account_id (Meta) but not client_id (Wpromote's
+    C<8 digits> dataset name). This bridges the two so the MetaDataClient knows
+    which dataset to query. Returns None when the account can't be resolved
+    (e.g., no performance data yet), so orchestration can surface a clear error.
+    """
+    def resolve_client_id(self, account_id: str) -> str | None: ...
+
+
 class PolarisClient(Protocol):
     """Wpromote client directory lookups. Polaris is NOT a Meta data source;
     it tells us which clients have Paid Social service and who to email.

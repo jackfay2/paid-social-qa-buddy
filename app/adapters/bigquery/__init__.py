@@ -5,6 +5,13 @@ from app.adapters.bigquery.client import (
     InvalidCampaignIdError,
     InvalidClientIdError,
 )
+from app.adapters.bigquery.resolver import (
+    AccountResolutionError,
+    AmbiguousAccountError,
+    BigQueryAccountResolver,
+    InvalidAccountIdError,
+    ResolverConfig,
+)
 
 __all__ = [
     "BigQueryMetaClient",
@@ -12,4 +19,9 @@ __all__ = [
     "BigQueryMetaClientError",
     "InvalidCampaignIdError",
     "InvalidClientIdError",
+    "AccountResolutionError",
+    "AmbiguousAccountError",
+    "BigQueryAccountResolver",
+    "InvalidAccountIdError",
+    "ResolverConfig",
 ]
