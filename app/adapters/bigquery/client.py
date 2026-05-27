@@ -87,9 +87,15 @@ class BigQueryMetaClient:
         self._cache: dict[tuple[str, str, str], Any] = {}
 
     def get_campaign(self, client_id: str, campaign_id: str) -> dict[str, Any]:
-        """Fetch one campaign row by (client_id, campaign_id).
+        """Fetch one campaign row by (client_id, campaign_id), or {} if none.
 
-        Returns the row as a dict, or {} if no row matches.
+        SELECT * because per-client datasets do NOT share an identical schema
+        (confirmed live 2026: some clients' tables lack columns others have).
+        Naming columns breaks on any client missing one; SELECT * is robust,
+        and check functions read fields defensively (absent field -> Review).
+
+        Filters on `campaign_id` (the Meta campaign ID, consistent with the
+        adset/ad tables) rather than `id`.
         """
         self._validate_ids(client_id, campaign_id)
         cache_key = ("campaign", client_id, campaign_id)
@@ -97,106 +103,51 @@ class BigQueryMetaClient:
             return self._cache[cache_key]
 
         table = self._table_ref(client_id, "facebook_ads__campaigns")
-        query = f"""
-            SELECT
-              id,
-              account_id,
-              campaign_id,
-              name,
-              objective,
-              effective_status,
-              buying_type,
-              spend_cap,
-              start_time,
-              created_time
-            FROM {table}
-            WHERE id = @campaign_id
-            LIMIT 1
-        """
+        query = f"SELECT * FROM {table} WHERE campaign_id = @campaign_id LIMIT 1"
         rows = self._run_query(query, campaign_id)
         result = dict(rows[0]) if rows else {}
         self._cache[cache_key] = result
         return result
 
     def get_ad_sets(self, client_id: str, campaign_id: str) -> list[dict[str, Any]]:
-        """Fetch all ad sets under a campaign, joined with targeting rows.
+        """Fetch all ad sets under a campaign (SELECT *). Returns [] if none.
 
-        Each result dict includes both adset-level fields and the targeting
-        fields from facebook_ads__adset_targetings (age, gender, location,
-        excluded audiences, optimization). Returns [] if no rows match.
+        Targeting data (age, gender, location, audiences, optimization) lives in
+        a separate facebook_ads__adset_targetings table. It is NOT merged here
+        yet — that comes when ad-set-level checks land (it'll be a separate fetch
+        merged by adset_id, not a SQL JOIN, to stay robust to schema variance).
+        The campaign-level checks don't need it.
+
+        SELECT * for the same per-client schema-variance reason as get_campaign:
+        some clients' adsets tables are missing columns others have (e.g.
+        `countries`), so naming columns is fragile.
         """
         self._validate_ids(client_id, campaign_id)
         cache_key = ("ad_sets", client_id, campaign_id)
         if cache_key in self._cache:
             return self._cache[cache_key]
 
-        adsets_table = self._table_ref(client_id, "facebook_ads__adsets")
-        targetings_table = self._table_ref(client_id, "facebook_ads__adset_targetings")
-        query = f"""
-            SELECT
-              a.id,
-              a.adset_id,
-              a.campaign_id,
-              a.name,
-              a.effective_status,
-              a.budget_remaining,
-              a.start_time,
-              a.created_time,
-              a.updated_time,
-              a.countries AS adset_countries,
-              t.age_min,
-              t.age_max,
-              t.genders,
-              t.countries AS targeting_countries,
-              t.location_types,
-              t.excluded_custom_audiences,
-              t.optimization,
-              t.brand_safety_content_filter_levels
-            FROM {adsets_table} a
-            LEFT JOIN {targetings_table} t
-              ON t.adset_id = a.id
-            WHERE a.campaign_id = @campaign_id
-        """
+        table = self._table_ref(client_id, "facebook_ads__adsets")
+        query = f"SELECT * FROM {table} WHERE campaign_id = @campaign_id"
         rows = self._run_query(query, campaign_id)
         result = [dict(row) for row in rows]
         self._cache[cache_key] = result
         return result
 
     def get_ads(self, client_id: str, campaign_id: str) -> list[dict[str, Any]]:
-        """Fetch all ads under a campaign with their denormalized creative record.
+        """Fetch all ads under a campaign (SELECT *). Returns [] if none.
 
-        The ads table holds a `creative` RECORD that mirrors facebook_ads__ad_creatives,
-        so no separate JOIN is needed for copy/headline/CTA/landing-URL fields.
-        Returns [] if no rows match.
+        The ads table holds a denormalized `creative` RECORD, so copy/headline/
+        CTA/landing-URL fields come back nested: ad["creative"]["title"], etc.
+        SELECT * for per-client schema-variance robustness (see get_campaign).
         """
         self._validate_ids(client_id, campaign_id)
         cache_key = ("ads", client_id, campaign_id)
         if cache_key in self._cache:
             return self._cache[cache_key]
 
-        ads_table = self._table_ref(client_id, "facebook_ads__ads")
-        query = f"""
-            SELECT
-              id,
-              ad_id,
-              adset_id,
-              campaign_id,
-              ad_creative_id,
-              name,
-              effective_status,
-              status,
-              bid_type,
-              bid_amount,
-              adlabels,
-              creative.title AS creative_title,
-              creative.body AS creative_body,
-              creative.call_to_action_type AS creative_cta,
-              creative.image_url AS creative_image_url,
-              creative.object_type AS creative_object_type,
-              creative.object_url AS creative_object_url
-            FROM {ads_table}
-            WHERE campaign_id = @campaign_id
-        """
+        table = self._table_ref(client_id, "facebook_ads__ads")
+        query = f"SELECT * FROM {table} WHERE campaign_id = @campaign_id"
         rows = self._run_query(query, campaign_id)
         result = [dict(row) for row in rows]
         self._cache[cache_key] = result
