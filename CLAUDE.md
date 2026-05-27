@@ -6,7 +6,7 @@ Auto-loaded by Claude Code when working in the `paid-social-qa-buddy` repo. Capt
 
 Maya Gundepudi (Search QA Buddy owner) is handing off the Paid Social extension to Jack Fay. Original MVP target was **June 5, 2026**; that date has passed and the realistic target slipped (single-developer project, dependency chain). Phase 1 is Meta only. Meta data comes from BigQuery (Airbyte-synced daily from the Meta Marketing API), not directly from Meta. Phases 2+ add TikTok, Snap, Reddit, Pinterest, LinkedIn using the same architecture with new connectors and registries.
 
-**Build status: vertical slice complete (mocked).** The Social worker repo exists at `github.com/jackfay2/paid-social-qa-buddy` (local: `/Users/jack.fay/paid-social-qa-buddy`). All five backing-service adapters, the account resolver, pipeline, orchestration service, worker endpoint, and 2 deterministic checks are built and unit-tested (142 tests). Everything is verified against mocks — **not yet run against live data.** See Implementation status below.
+**Build status: vertical slice built, data layer validated against live BigQuery.** Repo at `github.com/jackfay2/paid-social-qa-buddy` (local: `/Users/jack.fay/paid-social-qa-buddy`). Built + unit-tested (163 tests, CI green on push): five backing-service adapters, account resolver, Gemini text-check adapter, pipeline, orchestration, worker endpoint, Cloud Tasks OIDC auth, and 2 deterministic checks. The **full worker has been run end-to-end against real BigQuery** (resolver + fetch + orchestration + checks → correct verdicts, 2026-05-27). The literal Google Sheets and Slack calls remain mocked/simulated (Sheets OAuth is blocked on this workspace — see findings). See Implementation status below.
 
 ## People
 
@@ -49,11 +49,13 @@ Per-client routing: each client has its own BigQuery dataset (`C<client_id>`). R
 
 **account_id → client_id resolution (decided):** the envelope carries the Meta `account_id`; the worker resolves `client_id` itself by querying the cross-client `summary.facebook_ads__account_performance` table (has both columns). Returns None for accounts with no performance data → orchestration surfaces a clear "account not found" error. Chose worker-side resolution over builder-typed or listener-resolved, for control. There is no cross-client `facebook_ads__accounts` table — only the performance one — hence that source.
 
-**BigQuery field coverage (schema dig 2026-05-22):** only ~16 of Kerri's ~37 checks have backing fields today.
-- `facebook_ads__campaigns`: objective, buying_type present; **daily_budget, bid_strategy NOT** (Riley/Nikki).
-- `facebook_ads__adsets` + `facebook_ads__adset_targetings`: name, start_time, effective_status, age_min/max, genders, countries, location_types, excluded_custom_audiences, optimization present; **spend min/max, end_time, placements, promoted_object (pixel/event), attribution NOT.**
-- `facebook_ads__ads`: name, effective_status, status, bid_type/amount, denormalized `creative` (title, body, call_to_action_type, object_url) present; **description, site_links, display URL/caption, actor_id, instagram_user_id NOT.**
-- Missing-field checks return Review until the columns land. The age_min/age_max template mapping was swapped (Brandon confirmed) — use age_min for Age Min.
+**BigQuery field coverage — CLIENT-DEPENDENT (key live finding, 2026-05-27).** Per-client datasets do NOT share an identical schema. The first dig (`C00030334`, a sparse client) suggested only ~16 of ~37 checks were backed — but an active client (`C61854560`) had far more: `bid_strategy`, `daily_budget`, `lifetime_budget`, spend caps, `end_time`, `optimization_goal`, `attribution_spec`, and targeting (age/gender/location/audiences) **nested inside the adsets row** rather than a separate `facebook_ads__adset_targetings` table. Implications:
+- Coverage varies by client; the "~16 of 37" figure was pessimistic (sparse client). Re-assess against a rich client before telling Riley/Nikki what's missing.
+- **Targeting location varies**: nested in `facebook_ads__adsets` for some clients, separate `facebook_ads__adset_targetings` table for others. Ad-set checks must handle both.
+- Because of this variance, **`BigQueryMetaClient` uses `SELECT *`** (not named columns) — naming columns breaks on whatever a given client's table is missing. Check functions read fields defensively (`.get()`; absent → Review).
+- The ad `creative` record was all-null on the (old, paused) campaign tested — creative text may only populate for active ads. Validate creative/copy checks against an active ad.
+- Template fix (Brandon confirmed): the age_min/age_max mapping was swapped — use age_min for Age Min.
+- **Real objective values are legacy** (CONVERSIONS, LEAD_GENERATION, PAGE_LIKES), not the new ODAX `OUTCOME_*`. The `campaign_objective` check's value-map needs calibration with Brandon to cover both (it currently only coincidentally handles CONVERSIONS).
 
 ## Hard rule: do NOT touch the Search repo
 
@@ -61,25 +63,28 @@ The Search repo lives at `/Users/jack.fay/Paid Social QA Buddy Bot/qa-buddy-bot-
 
 ## Implementation status (Social repo)
 
-Built and unit-tested (142 tests, all mocked — NOT yet run against live data). Each adapter sits behind a Protocol in `app/core/contracts.py` (12-factor IV).
+Built and unit-tested (163 tests; CI runs them on push). The data layer + full orchestration have been validated against live BigQuery. Each adapter sits behind a Protocol in `app/core/contracts.py` (12-factor IV).
 
 - **Adapters:**
-  - `app/adapters/bigquery/` — `BigQueryMetaClient` (campaign/adset/ad fetch, ID validation, per-job cache) + `BigQueryAccountResolver` (account_id → client_id)
+  - `app/adapters/bigquery/` — `BigQueryMetaClient` (campaign/adset/ad fetch via `SELECT *`, ID validation, per-job cache) + `BigQueryAccountResolver` (account_id → client_id)
   - `app/adapters/polaris/` — `PolarisClient` (DRF pagination, `Token` auth, recipient resolution)
   - `app/adapters/slack/` — `SlackClient` (chat.postMessage, `Bearer` auth, transient/terminal error classification)
   - `app/adapters/storage/` — `InMemoryRunStore` + `FirestoreRunStore` (run lifecycle, notification dedup, tags records `qa_app="social"`)
   - `app/adapters/sheets/` — `GoogleSheetsClient` (alias-based header detection, batched writes, specific "not shared with SA" error) + pure `parser.py`
+  - `app/adapters/gemini/` — `GeminiClient` (batched text checks via Gemini REST/httpx, confidence threshold, Review on any failure) + `StubGeminiClient`. NOT yet wired into orchestration.
 - **Core:** `app/core/pipeline.py` (execute_checks, build_summary), `app/core/orchestration.py` (`SocialQAOrchestrationService` — full flow; every failure path returns a terminal result with a clear message)
-- **Endpoint:** `app/api/server.py` `/tasks/qa/run` (parse → timeout-guarded run → Slack post with dedup), `app/api/wiring.py` (adapter assembly, monkeypatch-able for tests), `app/api/models.py`
-- **Checks:** `app/checks/meta_checks.py` — `campaign_objective`, `campaign_buying_type` (Meta-enum normalization so `Traffic` == `OUTCOME_TRAFFIC`; ambiguity → Review). Registered in `app/checks/registry.py`.
+- **Endpoint:** `app/api/server.py` `/tasks/qa/run` (parse → auth → timeout-guarded run → Slack post with dedup), `app/api/wiring.py` (adapter assembly, monkeypatch-able), `app/api/models.py`, `app/api/task_auth.py` (Cloud Tasks OIDC verification — implemented, fail-closed)
+- **Checks:** `app/checks/meta_checks.py` — `campaign_objective`, `campaign_buying_type` (Meta-enum normalization; ambiguity → Review). Registered in `app/checks/registry.py`.
+- **Dev scripts:** `scripts/live_check.py` (live BQ resolver+fetch smoke), `scripts/local_qa_run.py` (full orchestration vs live BQ, in-memory sheet), `scripts/setup_test_sheet.py` (creates a test sheet via your ADC).
+- **CI:** `.github/workflows/ci.yml` runs pytest on Python 3.11 on push/PR.
 
 **Not yet done (rough priority order):**
-1. Run against live data — everything is mocked; highest-value next validation
-2. Cloud Tasks OIDC auth verification (deferred; endpoint refuses when auth required-but-unimplemented; local sets `QA_CLOUD_TASKS_AUTH_REQUIRED=false`)
-3. GCP provisioning (`qa-buddy-runs-social` queue, `qa-buddy-worker-social{,-test}` Cloud Run, IAM incl. BQ read on `polaris-data-317717`)
-4. Maya's listener change (route `qa_app=social`; relax the 10-digit account_id validation so Meta account IDs aren't rejected)
-5. Gemini text-check adapter (none built yet)
-6. Expand the check registry past the 2 starter checks
+1. Wire the Gemini adapter into orchestration (build the text-check batch from ad evidence, merge verdicts) — needs Brandon's text-check defs + an active ad with populated creative to validate.
+2. Live Google Sheets read/write — user-OAuth Sheets scopes are blocked on this workspace; use the service account (`GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON`) and share the sheet with the SA. Until then sheets are exercised via the in-memory stand-in in `local_qa_run.py`.
+3. Maya's listener change (route `qa_app=social`; relax the 10-digit account_id validation so Meta IDs aren't rejected).
+4. GCP provisioning (`qa-buddy-runs-social` queue, `qa-buddy-worker-social{,-test}` Cloud Run, IAM incl. BQ read on `polaris-data-317717`).
+5. Expand the check registry (Kerri locks check_ids; Riley/Nikki land fields; calibrate value-maps with Brandon).
+6. Deploy + the full test-channel flow (gated on the above).
 
 ## Coordination contract with Maya
 
@@ -158,6 +163,10 @@ Lock these three in a shared doc before either repo ships changes. They are the 
 - ✗ Pre-existing BQ wrapper → none existed; built fresh
 - ✗ Check naming → we own it, lowercase_underscore (Brandon OK'd; Kerri may revisit when back)
 - ✗ Slack-vs-Social field naming → `qa_app` ("search"/"social"); listener infers from channel (Maya OK'd, handling greystar/test-channel mapping)
+- ✗ Cloud Tasks OIDC auth → implemented (`app/api/task_auth.py`, fail-closed; was deferred)
+- ✗ Data layer validated end-to-end against live BigQuery (2026-05-27) — correct verdicts
+- ✗ Local Sheets auth → user-OAuth Sheets/Drive scopes are blocked on this Google Workspace; live sheets require the service account; local uses the in-memory sheet stand-in
+- ✗ Per-client BQ schema variance → confirmed real; `BigQueryMetaClient` uses `SELECT *` (see Data architecture)
 - Kerri's final `check_id` list — pending (Brandon is interim; template's checks + BQ fields are known, formal IDs TBD)
 - BigQuery field timing (Riley + Nikki sprint) — which of the ~16 missing fields land, and when
 - Daily-stale vs real-time — Airbyte syncs daily; confirm daily-stale acceptable, or whether direct Meta API needed for fresh-launch cases
@@ -167,20 +176,25 @@ Lock these three in a shared doc before either repo ships changes. They are the 
 
 ## Testing & workflow conventions
 
-- Social repo: `source .venv/bin/activate && pytest -q` (142 tests). The venv must be Python 3.11 (Homebrew at `/Users/jack.fay/homebrew`), not the system 3.9.
+- Social repo: `source .venv/bin/activate && pytest -q` (163 tests). The venv must be Python 3.11 (Homebrew at `/Users/jack.fay/homebrew`), not the system 3.9.
 - New shells need Homebrew on PATH: `eval "$(/Users/jack.fay/homebrew/bin/brew shellenv)"` (added to `~/.zshrc`).
-- Local worker runs: `QA_CLOUD_TASKS_AUTH_REQUIRED=false` (OIDC not implemented), `QA_RUN_STORE_BACKEND=memory`, sheets via ADC (`gcloud auth application-default login`).
+- Local worker runs: `QA_CLOUD_TASKS_AUTH_REQUIRED=false` (OIDC verification is implemented but unwanted locally), `QA_RUN_STORE_BACKEND=memory`. Live Sheets via ADC is blocked (scopes); use `scripts/local_qa_run.py` (in-memory sheet) or the service account for real sheets.
+- `scripts/live_check.py` and `scripts/local_qa_run.py` hit live BigQuery (read-only) with your personal ADC — safe, no writes, no other GCP contact.
 - Adapter tests mock the external client (gspread, httpx, bigquery, requests, firestore); wiring functions are monkeypatched in endpoint tests.
 - Search-repo conventions that matter only when coordinating Maya's listener change: `EntityFilter` is the selection source of truth, dedupe keys include normalized filter intent, `pending_confirmation` is a valid run state.
 
 ## Next actions (when resuming work)
 
-1. **Run the vertical slice against live data** (highest value): a real Peacock account/campaign with BQ data + a test QA sheet shared with Jack's Google account, with check_ids `campaign_objective` and `campaign_buying_type` in column A plus expected values. Run the worker locally, POST a task payload, watch real verdicts. Surfaces integration bugs mocks can't (real schemas, real enum values, real sheet I/O).
-2. Implement Cloud Tasks OIDC auth verification (pre-deploy gate).
-3. Provision GCP: `qa-buddy-runs-social` queue, `qa-buddy-worker-social{,-test}` Cloud Run, IAM (BQ read for the SA, Cloud Tasks invoke).
-4. Maya's listener change: route `qa_app=social`, relax the 10-digit account_id validation for Meta IDs.
-5. Expand the check registry as Kerri locks check_ids and Riley/Nikki land BQ fields.
-6. Build the Gemini text-check adapter (spellcheck / headline / description rows) — batched, Review-on-uncertainty.
+Cross-team (have lead time — fire these first):
+1. **Maya** — listener change (spec drafted): for `qa_app=social`, skip the 10-digit account_id validation (Meta IDs are ~17 digits), skip MCC routing, route to the `qa-buddy-runs-social` queue + social worker URL. Get her timing.
+2. **Brandon/Kerri** — canonical objective values (real data is legacy: CONVERSIONS / LEAD_GENERATION / PAGE_LIKES, plus ODAX `OUTCOME_*`) + whether legacy maps to new; and the MVP must-have check subset.
+3. **GCP provisioning owner** — who creates the `qa-buddy-runs-social` queue, deploys `qa-buddy-worker-social{,-test}`, and grants the SA `roles/bigquery.dataViewer` on `polaris-data-317717` + Cloud Tasks invoke.
+
+Solo build (after the above inputs land):
+4. Wire Gemini into orchestration (text-check batch from ad evidence + merge); validate against an active ad with real creative.
+5. Service-account Sheets auth → validate live sheet read/write (currently in-memory).
+6. Expand the check registry (calibrate value-maps with Brandon).
+7. Deploy to test, then the full test-channel flow.
 
 ## Repo housekeeping
 
