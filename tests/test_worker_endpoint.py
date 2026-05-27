@@ -59,11 +59,12 @@ def _client() -> TestClient:
 # --- auth gate -------------------------------------------------------------
 
 
-def test_auth_required_but_unimplemented_returns_503(monkeypatch) -> None:
+def test_auth_required_missing_token_returns_401(monkeypatch) -> None:
     monkeypatch.setenv("QA_CLOUD_TASKS_AUTH_REQUIRED", "true")
+    # No Authorization header on the request -> verification fails closed.
     response = _client().post("/tasks/qa/run", json=_PAYLOAD)
-    assert response.status_code == 503
-    assert response.json()["detail"]["error_code"] == "task_auth_not_implemented"
+    assert response.status_code == 401
+    assert response.json()["detail"]["error_code"] == "task_auth_failed"
 
 
 # --- happy path ------------------------------------------------------------

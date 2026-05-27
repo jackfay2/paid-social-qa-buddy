@@ -19,6 +19,11 @@ from fastapi.responses import JSONResponse
 from app.adapters.slack import SlackClient, SlackPostError
 from app.api import wiring
 from app.api.models import SocialTaskRequest, SocialTaskResponse
+from app.api.task_auth import (
+    TaskAuthError,
+    TaskAuthSettings,
+    verify_cloud_task_request,
+)
 from app.config import load_settings
 from app.core.orchestration import OrchestrationRequest, OrchestrationResult
 from app.logging_config import configure_logging
@@ -114,26 +119,19 @@ def qa_run_task(payload: SocialTaskRequest, request: Request) -> SocialTaskRespo
 
 
 def _verify_task_auth(request: Request, settings) -> None:
-    """Cloud Tasks OIDC verification.
-
-    DEFERRED (pre-deploy task): real verification of the OIDC token against the
-    expected audience + service-account email via google.oauth2.id_token. Until
-    that lands, we refuse to run when auth is required rather than pretend the
-    endpoint is protected. Local runs set QA_CLOUD_TASKS_AUTH_REQUIRED=false.
-    """
-    if not settings.qa_cloud_tasks_auth_required:
-        return
-    raise HTTPException(
-        status_code=503,
-        detail={
-            "error_code": "task_auth_not_implemented",
-            "message": (
-                "Cloud Tasks OIDC verification is not implemented yet. "
-                "Set QA_CLOUD_TASKS_AUTH_REQUIRED=false for local runs, and "
-                "implement verification before deploying a public worker."
-            ),
-        },
+    """Verify the Cloud Tasks OIDC token. No-op when auth isn't required (local)."""
+    auth_settings = TaskAuthSettings(
+        auth_required=settings.qa_cloud_tasks_auth_required,
+        expected_audience=settings.qa_cloud_tasks_oidc_audience,
+        expected_service_account_email=settings.qa_cloud_tasks_service_account_email,
     )
+    try:
+        verify_cloud_task_request(request.headers, auth_settings)
+    except TaskAuthError as exc:
+        raise HTTPException(
+            status_code=401,
+            detail={"error_code": "task_auth_failed", "message": str(exc)},
+        ) from exc
 
 
 def _run_with_timeout(
