@@ -50,9 +50,16 @@ class GoogleSheetsConfig:
     """Sheet client settings.
 
     worksheet_name: tab to read/write. Blank -> first sheet.
-    auth_mode: "adc" (default) or "service_account".
+    auth_mode:
+      - "service_account" — JSON / file required; hard-fail otherwise. Prod.
+      - "adc" — Application Default Credentials. Works locally if the dev's
+        gcloud ADC has Sheets/Drive scopes (org-blocked on Wpromote Workspace).
+      - "auto" — try service_account first when JSON/file is present, fall
+        back to ADC. The friendliest local path: works whether or not a
+        service-account JSON is configured.
     service_account_file / service_account_json: used when auth_mode is
-        service_account.
+        service_account or auto. The JSON arrives via Secret Manager in prod
+        (see app.config._resolve_secrets); env-direct also works for local.
     """
     worksheet_name: str = ""
     auth_mode: str = "adc"
@@ -78,21 +85,57 @@ class GoogleSheetsClient:
         if self._injected_client is not None:
             return self._injected_client
 
-        import gspread
-
         mode = (self.config.auth_mode or "adc").strip().lower()
-        if mode == "service_account":
-            if self.config.service_account_json.strip():
-                payload = json.loads(self.config.service_account_json)
-                return gspread.service_account_from_dict(payload)
-            if self.config.service_account_file.strip():
-                return gspread.service_account(filename=self.config.service_account_file)
+        if mode not in {"service_account", "adc", "auto"}:
             raise RuntimeError(
-                "auth_mode=service_account requires service_account_file or "
-                "service_account_json."
+                f"Invalid qa_sheets_auth_mode '{self.config.auth_mode}'; expected "
+                "'service_account', 'adc', or 'auto'."
             )
 
-        # Default: ADC.
+        if mode == "service_account":
+            return self._service_account_client()  # hard-fails if not configured
+
+        if mode == "auto":
+            # Try the service account first when configured. Any failure
+            # there (missing creds, bad JSON, gspread error) falls through
+            # to ADC so the local path keeps working without an SA key.
+            try:
+                client = self._service_account_client(require_configured=False)
+            except Exception as exc:  # noqa: BLE001 — fall through, log at info
+                _logger.info(
+                    "sheets_auth_auto_fallback",
+                    extra={"reason": str(exc)},
+                )
+                client = None
+            if client is not None:
+                return client
+
+        return self._adc_client()
+
+    def _service_account_client(self, *, require_configured: bool = True):
+        """Build a gspread client from a service-account JSON or file.
+
+        When `require_configured=False`, returns None if no JSON/file is
+        configured (used by auto-mode to silently fall through to ADC).
+        """
+        import gspread
+
+        if self.config.service_account_json.strip():
+            payload = json.loads(self.config.service_account_json)
+            return gspread.service_account_from_dict(payload)
+        if self.config.service_account_file.strip():
+            return gspread.service_account(filename=self.config.service_account_file)
+        if not require_configured:
+            return None
+        raise RuntimeError(
+            "auth_mode=service_account requires service_account_file or "
+            "service_account_json (configure GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON "
+            "directly, or set GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON_SECRET_NAME "
+            "+ QA_USE_SECRET_MANAGER=true to pull it from Secret Manager)."
+        )
+
+    def _adc_client(self):
+        import gspread
         import google.auth
         from google.auth.transport.requests import Request
 
