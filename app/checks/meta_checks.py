@@ -13,10 +13,15 @@ Design principles (from the handoff):
     (Traffic). Normalize + map before comparing — this is the false-negative
     trap that made the old spreadsheet-formula approach useless (handoff §2).
 
-NOTE: the value mappings below (objectives, buying types) are a reasonable first
-pass. They SHOULD be validated against real QA sheets / with Kerri before we
-fully trust Fix verdicts in production. Until then they lean toward Review when
-they can't confidently interpret a value.
+Value-map calibration:
+- Objective map is calibrated to Brandon's rule (2026-05-28): match against the
+  new ODAX objectives (Sales / Traffic / Leads / Awareness / Engagement / App
+  Promotion), and treat legacy Meta enums (CONVERSIONS, LEAD_GENERATION,
+  PAGE_LIKES, etc.) as equivalent to their modern replacements per Meta's
+  official objective migration.
+- Buying-type set (AUCTION / RESERVED / FIXED_CPM) is stable per Meta's docs.
+- Future value-mapped checks: validate maps with Brandon/Kerri before trusting
+  Fix verdicts.
 """
 
 from __future__ import annotations
@@ -62,16 +67,37 @@ def _is_blank(value: Any) -> bool:
 
 # --- campaign_objective ----------------------------------------------------
 
-# Meta ODAX objective enums, mapped from common builder-friendly inputs.
+# Meta objective values mapped to the ODAX OUTCOME_* canonical form.
+#
+# Brandon (2026-05-28) confirmed: new campaigns being QA'd use the new ODAX
+# objectives only. Older campaigns may still carry legacy enum values; those
+# should be treated as equivalent to their modern replacement per Meta's
+# official migration. So both friendly inputs AND legacy enums normalize to the
+# same OUTCOME_* key, and the comparison Passes cleanly across either taxonomy.
 _OBJECTIVE_SYNONYMS = {
+    # New ODAX objectives (what builders type and what new campaigns store).
     "awareness": "OUTCOME_AWARENESS",
     "traffic": "OUTCOME_TRAFFIC",
     "engagement": "OUTCOME_ENGAGEMENT",
     "leads": "OUTCOME_LEADS",
     "sales": "OUTCOME_SALES",
-    "conversions": "OUTCOME_SALES",
     "app promotion": "OUTCOME_APP_PROMOTION",
     "app promo": "OUTCOME_APP_PROMOTION",
+    # Legacy Meta enums (pre-ODAX), mapped to their modern replacements per
+    # Meta's official objective migration. Older campaigns may carry these.
+    "conversions": "OUTCOME_SALES",
+    "product catalog sales": "OUTCOME_SALES",
+    "lead generation": "OUTCOME_LEADS",
+    "brand awareness": "OUTCOME_AWARENESS",
+    "reach": "OUTCOME_AWARENESS",
+    "store visits": "OUTCOME_AWARENESS",
+    "link clicks": "OUTCOME_TRAFFIC",
+    "post engagement": "OUTCOME_ENGAGEMENT",
+    "page likes": "OUTCOME_ENGAGEMENT",
+    "event responses": "OUTCOME_ENGAGEMENT",
+    "video views": "OUTCOME_ENGAGEMENT",
+    "messages": "OUTCOME_ENGAGEMENT",
+    "app installs": "OUTCOME_APP_PROMOTION",
 }
 
 

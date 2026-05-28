@@ -62,6 +62,40 @@ def test_objective_unrecognized_actual_is_review() -> None:
     assert result.verdict == "Review"
 
 
+# --- campaign_objective: legacy enum migration (Brandon calibration 2026-05-28) -----
+
+
+def test_objective_legacy_conversions_passes_for_sales() -> None:
+    """Meta migrated CONVERSIONS -> OUTCOME_SALES; bot treats them as equivalent."""
+    row = _row("campaign_objective", "Sales")
+    result = check_campaign_objective(row, evidence=_evidence({"objective": "CONVERSIONS"}))
+    assert result.verdict == "Pass"
+
+
+def test_objective_legacy_lead_generation_passes_for_leads() -> None:
+    row = _row("campaign_objective", "Leads")
+    result = check_campaign_objective(row, evidence=_evidence({"objective": "LEAD_GENERATION"}))
+    assert result.verdict == "Pass"
+
+
+def test_objective_legacy_page_likes_passes_for_engagement() -> None:
+    row = _row("campaign_objective", "Engagement")
+    result = check_campaign_objective(row, evidence=_evidence({"objective": "PAGE_LIKES"}))
+    assert result.verdict == "Pass"
+
+
+def test_objective_legacy_link_clicks_passes_for_traffic() -> None:
+    row = _row("campaign_objective", "Traffic")
+    result = check_campaign_objective(row, evidence=_evidence({"objective": "LINK_CLICKS"}))
+    assert result.verdict == "Pass"
+
+
+def test_objective_legacy_app_installs_passes_for_app_promotion() -> None:
+    row = _row("campaign_objective", "App Promotion")
+    result = check_campaign_objective(row, evidence=_evidence({"objective": "APP_INSTALLS"}))
+    assert result.verdict == "Pass"
+
+
 # --- campaign_buying_type --------------------------------------------------
 
 
