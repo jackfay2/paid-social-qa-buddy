@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from app.checks.meta_checks import (
+    check_campaign_bid_strategy,
     check_campaign_buying_type,
     check_campaign_objective,
+    check_campaign_start_date,
+    check_campaign_status,
 )
 from app.checks.registry import CHECK_REGISTRY, run_check
 from app.models import CheckRow
@@ -123,12 +126,132 @@ def test_buying_type_unrecognized_expected_is_review() -> None:
     assert result.verdict == "Review"
 
 
+# --- campaign_status -------------------------------------------------------
+
+
+def test_status_active_match_passes() -> None:
+    row = _row("campaign_status", "Live")
+    result = check_campaign_status(row, evidence=_evidence({"effective_status": "ACTIVE"}))
+    assert result.verdict == "Pass"
+
+
+def test_status_paused_match_passes() -> None:
+    row = _row("campaign_status", "Paused")
+    result = check_campaign_status(row, evidence=_evidence({"effective_status": "PAUSED"}))
+    assert result.verdict == "Pass"
+
+
+def test_status_mismatch_is_fix() -> None:
+    row = _row("campaign_status", "Live")
+    result = check_campaign_status(row, evidence=_evidence({"effective_status": "PAUSED"}))
+    assert result.verdict == "Fix"
+
+
+def test_status_missing_field_is_review() -> None:
+    row = _row("campaign_status", "Live")
+    result = check_campaign_status(row, evidence=_evidence({}))
+    assert result.verdict == "Review"
+
+
+def test_status_unrecognized_expected_is_review() -> None:
+    row = _row("campaign_status", "blue")
+    result = check_campaign_status(row, evidence=_evidence({"effective_status": "ACTIVE"}))
+    assert result.verdict == "Review"
+
+
+# --- campaign_start_date ---------------------------------------------------
+
+
+def test_start_date_match_datetime_actual_passes() -> None:
+    from datetime import datetime, timezone
+
+    row = _row("campaign_start_date", "10/05/2024")
+    actual = datetime(2024, 10, 5, 12, 30, 0, tzinfo=timezone.utc)
+    result = check_campaign_start_date(row, evidence=_evidence({"start_time": actual}))
+    assert result.verdict == "Pass"
+
+
+def test_start_date_match_iso_string_passes() -> None:
+    row = _row("campaign_start_date", "2024-10-05")
+    result = check_campaign_start_date(
+        row, evidence=_evidence({"start_time": "2024-10-05 12:30:00"})
+    )
+    assert result.verdict == "Pass"
+
+
+def test_start_date_mismatch_is_fix() -> None:
+    row = _row("campaign_start_date", "10/05/2024")
+    result = check_campaign_start_date(
+        row, evidence=_evidence({"start_time": "2024-11-15"})
+    )
+    assert result.verdict == "Fix"
+
+
+def test_start_date_unparseable_expected_is_review() -> None:
+    row = _row("campaign_start_date", "next tuesday")
+    result = check_campaign_start_date(
+        row, evidence=_evidence({"start_time": "2024-10-05"})
+    )
+    assert result.verdict == "Review"
+
+
+def test_start_date_missing_field_is_review() -> None:
+    row = _row("campaign_start_date", "10/05/2024")
+    result = check_campaign_start_date(row, evidence=_evidence({}))
+    assert result.verdict == "Review"
+
+
+# --- campaign_bid_strategy -------------------------------------------------
+
+
+def test_bid_strategy_friendly_synonym_passes() -> None:
+    """'Lowest cost' (Meta UI) matches LOWEST_COST_WITHOUT_CAP (Meta enum)."""
+    row = _row("campaign_bid_strategy", "Lowest cost")
+    result = check_campaign_bid_strategy(
+        row, evidence=_evidence({"bid_strategy": "LOWEST_COST_WITHOUT_CAP"})
+    )
+    assert result.verdict == "Pass"
+
+
+def test_bid_strategy_exact_enum_match_passes() -> None:
+    row = _row("campaign_bid_strategy", "COST_CAP")
+    result = check_campaign_bid_strategy(
+        row, evidence=_evidence({"bid_strategy": "COST_CAP"})
+    )
+    assert result.verdict == "Pass"
+
+
+def test_bid_strategy_mismatch_is_fix() -> None:
+    row = _row("campaign_bid_strategy", "Bid Cap")
+    result = check_campaign_bid_strategy(
+        row, evidence=_evidence({"bid_strategy": "LOWEST_COST_WITHOUT_CAP"})
+    )
+    assert result.verdict == "Fix"
+
+
+def test_bid_strategy_missing_field_is_review() -> None:
+    row = _row("campaign_bid_strategy", "Lowest cost")
+    result = check_campaign_bid_strategy(row, evidence=_evidence({}))
+    assert result.verdict == "Review"
+
+
+def test_bid_strategy_unrecognized_expected_is_review() -> None:
+    row = _row("campaign_bid_strategy", "magic")
+    result = check_campaign_bid_strategy(
+        row, evidence=_evidence({"bid_strategy": "LOWEST_COST_WITHOUT_CAP"})
+    )
+    assert result.verdict == "Review"
+
+
 # --- registry integration --------------------------------------------------
 
 
 def test_checks_registered() -> None:
     assert "campaign_objective" in CHECK_REGISTRY
     assert "campaign_buying_type" in CHECK_REGISTRY
+    assert "campaign_status" in CHECK_REGISTRY
+    assert "campaign_start_date" in CHECK_REGISTRY
+    assert "campaign_bid_strategy" in CHECK_REGISTRY
 
 
 def test_run_check_dispatches_to_objective() -> None:

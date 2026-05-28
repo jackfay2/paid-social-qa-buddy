@@ -26,6 +26,7 @@ Value-map calibration:
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from typing import Any
 
 from app.models import CheckResult, CheckRow
@@ -165,6 +166,205 @@ def check_campaign_buying_type(row: CheckRow, *, evidence: dict[str, Any] | None
             row,
             f'Could not interpret the expected buying type "{row.builder_input}". '
             f'Actual is "{actual}". Verify manually.',
+        )
+    if expected == actual_canon:
+        return _pass(row)
+    return _fix(row, f'Expected "{row.builder_input}", got "{actual}"')
+
+
+# --- campaign_status -------------------------------------------------------
+
+# Known Meta status enums (effective_status / status fields).
+_KNOWN_META_STATUSES = {
+    "ACTIVE",
+    "PAUSED",
+    "DELETED",
+    "ARCHIVED",
+    "PENDING_REVIEW",
+    "DISAPPROVED",
+    "PREAPPROVED",
+    "PENDING_BILLING_INFO",
+    "CAMPAIGN_PAUSED",
+    "ADSET_PAUSED",
+}
+
+_STATUS_SYNONYMS = {
+    "live": "ACTIVE",
+    "active": "ACTIVE",
+    "on": "ACTIVE",
+    "running": "ACTIVE",
+    "paused": "PAUSED",
+    "off": "PAUSED",
+    "archived": "ARCHIVED",
+    "deleted": "DELETED",
+}
+
+
+def _canonical_status(value: Any) -> str:
+    norm = _norm(value)
+    if not norm:
+        return ""
+    upper = norm.upper().replace(" ", "_")
+    if upper in _KNOWN_META_STATUSES:
+        return upper
+    return _STATUS_SYNONYMS.get(norm, "")
+
+
+def check_campaign_status(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
+    actual = _campaign(evidence).get("effective_status")
+    if _is_blank(actual):
+        return _review(
+            row, "Campaign status not available in BigQuery; verify manually."
+        )
+
+    expected = _canonical_status(row.builder_input)
+    actual_canon = _canonical_status(actual)
+
+    if not expected:
+        return _review(
+            row,
+            f'Could not interpret the expected status "{row.builder_input}". '
+            f'Actual is "{actual}". Verify manually.',
+        )
+    if not actual_canon:
+        return _review(
+            row, f'Actual status "{actual}" not recognized. Verify manually.'
+        )
+    if expected == actual_canon:
+        return _pass(row)
+    return _fix(row, f'Expected "{row.builder_input}", got "{actual}"')
+
+
+# --- campaign_start_date ---------------------------------------------------
+
+# Date formats we accept from builder inputs. Kerri's template suggests
+# MM/DD/YYYY 00:00:00 PM, but builders often abbreviate; we accept common forms.
+_DATE_FORMATS = (
+    "%Y-%m-%d",
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%d %H:%M:%S",
+    "%m/%d/%Y",
+    "%m/%d/%Y %H:%M:%S",
+    "%m/%d/%Y %I:%M:%S %p",
+)
+
+
+def _parse_date(value: Any) -> date | None:
+    """Parse a date from a builder string or BQ TIMESTAMP. Returns None on failure."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    # Final fallback: Python's flexible ISO parser handles many variants.
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).date()
+    except (ValueError, AttributeError):
+        return None
+
+
+def check_campaign_start_date(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
+    actual = _campaign(evidence).get("start_time")
+    if _is_blank(actual):
+        return _review(
+            row, "Campaign start time not available in BigQuery; verify manually."
+        )
+
+    expected_date = _parse_date(row.builder_input)
+    actual_date = _parse_date(actual)
+
+    if expected_date is None:
+        return _review(
+            row,
+            f'Could not parse the expected start date "{row.builder_input}". '
+            "Use YYYY-MM-DD or MM/DD/YYYY.",
+        )
+    if actual_date is None:
+        return _review(
+            row,
+            f'Actual start time "{actual}" could not be parsed. Verify manually.',
+        )
+    if expected_date == actual_date:
+        return _pass(row)
+    return _fix(
+        row,
+        f"Expected start date {expected_date.isoformat()}, "
+        f"got {actual_date.isoformat()}",
+    )
+
+
+# --- campaign_bid_strategy -------------------------------------------------
+
+_KNOWN_BID_STRATEGIES = {
+    "LOWEST_COST_WITHOUT_CAP",
+    "LOWEST_COST_WITH_BID_CAP",
+    "COST_CAP",
+    "LOWEST_COST_WITH_MIN_ROAS",
+    "TARGET_COST",
+}
+
+# Meta UI labels and common shorthands mapped to the enum values. A reasonable
+# first pass that leans toward Review on unknown inputs; validate with Brandon
+# against real QA sheets before trusting Fix verdicts at scale.
+_BID_STRATEGY_SYNONYMS = {
+    "lowest cost": "LOWEST_COST_WITHOUT_CAP",
+    "lowest cost without cap": "LOWEST_COST_WITHOUT_CAP",
+    "highest volume": "LOWEST_COST_WITHOUT_CAP",
+    "auto bid": "LOWEST_COST_WITHOUT_CAP",
+    "auto": "LOWEST_COST_WITHOUT_CAP",
+    "automatic": "LOWEST_COST_WITHOUT_CAP",
+    "bid cap": "LOWEST_COST_WITH_BID_CAP",
+    "lowest cost with bid cap": "LOWEST_COST_WITH_BID_CAP",
+    "cost cap": "COST_CAP",
+    "cost per result goal": "COST_CAP",
+    "cost per result": "COST_CAP",
+    "roas goal": "LOWEST_COST_WITH_MIN_ROAS",
+    "min roas": "LOWEST_COST_WITH_MIN_ROAS",
+    "minimum roas": "LOWEST_COST_WITH_MIN_ROAS",
+    "lowest cost with min roas": "LOWEST_COST_WITH_MIN_ROAS",
+    "target cost": "TARGET_COST",
+}
+
+
+def _canonical_bid_strategy(value: Any) -> str:
+    norm = _norm(value)
+    if not norm:
+        return ""
+    upper = norm.upper().replace(" ", "_")
+    if upper in _KNOWN_BID_STRATEGIES:
+        return upper
+    return _BID_STRATEGY_SYNONYMS.get(norm, "")
+
+
+def check_campaign_bid_strategy(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
+    actual = _campaign(evidence).get("bid_strategy")
+    if _is_blank(actual):
+        return _review(
+            row, "Bid strategy not available in BigQuery; verify manually."
+        )
+
+    expected = _canonical_bid_strategy(row.builder_input)
+    actual_canon = _canonical_bid_strategy(actual)
+
+    if not expected:
+        return _review(
+            row,
+            f'Could not interpret the expected bid strategy "{row.builder_input}". '
+            f'Actual is "{actual}". Verify manually.',
+        )
+    if not actual_canon:
+        return _review(
+            row,
+            f'Actual bid strategy "{actual}" not recognized. Verify manually.',
         )
     if expected == actual_canon:
         return _pass(row)
