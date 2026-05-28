@@ -12,6 +12,13 @@ from collections.abc import Callable
 from typing import Any
 
 from app.checks.meta_checks import (
+    check_adset_age_max,
+    check_adset_age_min,
+    check_adset_countries,
+    check_adset_end_date,
+    check_adset_genders,
+    check_adset_start_date,
+    check_adset_status,
     check_campaign_bid_strategy,
     check_campaign_buying_type,
     check_campaign_objective,
@@ -31,8 +38,17 @@ CHECK_REGISTRY: dict[str, CheckFunction] = {
     "campaign_status": check_campaign_status,
     "campaign_start_date": check_campaign_start_date,
     "campaign_bid_strategy": check_campaign_bid_strategy,
-    # Ad set / ad / text checks land as Kerri's check_ids lock and Riley/Nikki
-    # add columns. Checks for fields not yet in BigQuery return Review until the
+    # Ad set level. Targeting fields (age_*, genders, countries) read via
+    # _targeting.read_targeting so nested vs flat schemas both work.
+    "adset_status": check_adset_status,
+    "adset_start_date": check_adset_start_date,
+    "adset_end_date": check_adset_end_date,
+    "adset_age_min": check_adset_age_min,
+    "adset_age_max": check_adset_age_max,
+    "adset_genders": check_adset_genders,
+    "adset_countries": check_adset_countries,
+    # Ad / text checks land as Kerri's check_ids lock and Riley/Nikki add
+    # columns. Checks for fields not yet in BigQuery return Review until the
     # column lands. Organization (handoff §7.2): campaign / ad_set / ad / text.
 }
 

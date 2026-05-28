@@ -29,6 +29,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 
+from app.checks._targeting import read_targeting
 from app.models import CheckResult, CheckRow
 
 
@@ -60,6 +61,30 @@ def _campaign(evidence: dict[str, Any] | None) -> dict[str, Any]:
         return {}
     campaign = evidence.get("campaign")
     return campaign if isinstance(campaign, dict) else {}
+
+
+def _ad_sets(evidence: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Return the ad_sets list from evidence, defensively coerced.
+
+    A campaign may have 0..N ad sets. The handful of ad-set-level checks are
+    interpreted as "all ad sets must match the builder's expectation" — if any
+    ad set diverges, the check Fixes with that ad set's value.
+    """
+    if not isinstance(evidence, dict):
+        return []
+    ad_sets = evidence.get("ad_sets")
+    if not isinstance(ad_sets, list):
+        return []
+    return [a for a in ad_sets if isinstance(a, dict)]
+
+
+def _adset_label(adset: dict[str, Any]) -> str:
+    """Best-effort identifier for error messages."""
+    name = adset.get("name") or adset.get("adset_name")
+    if name:
+        return str(name)
+    adset_id = adset.get("id") or adset.get("adset_id") or adset.get("ad_set_id")
+    return f"ad set {adset_id}" if adset_id else "an ad set"
 
 
 def _is_blank(value: Any) -> bool:
@@ -369,3 +394,469 @@ def check_campaign_bid_strategy(row: CheckRow, *, evidence: dict[str, Any] | Non
     if expected == actual_canon:
         return _pass(row)
     return _fix(row, f'Expected "{row.builder_input}", got "{actual}"')
+
+
+# === Ad-set level checks ===================================================
+#
+# Semantics: a campaign has 0..N ad sets. Each check below interprets the
+# builder input as "every ad set must match this expectation." That mirrors how
+# the QA sheet is filled — one row per setting, expected to hold across all ad
+# sets in the campaign. If any ad set diverges, we Fix and point at that one.
+#
+# Per-client BQ schemas vary on ad-set fields too. Missing field → Review, not
+# Fix. The Fix verdict requires us to be sure we saw the actual value.
+
+
+# --- adset_status ----------------------------------------------------------
+
+
+def check_adset_status(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
+    ad_sets = _ad_sets(evidence)
+    if not ad_sets:
+        return _review(row, "No ad sets found in BigQuery for this campaign.")
+
+    expected = _canonical_status(row.builder_input)
+    if not expected:
+        return _review(
+            row,
+            f'Could not interpret the expected ad set status "{row.builder_input}".',
+        )
+
+    mismatched: list[tuple[str, str]] = []
+    unparseable: list[tuple[str, str]] = []
+    missing: list[str] = []
+
+    for adset in ad_sets:
+        actual = adset.get("effective_status")
+        if _is_blank(actual):
+            missing.append(_adset_label(adset))
+            continue
+        actual_canon = _canonical_status(actual)
+        if not actual_canon:
+            unparseable.append((_adset_label(adset), str(actual)))
+            continue
+        if actual_canon != expected:
+            mismatched.append((_adset_label(adset), str(actual)))
+
+    if mismatched:
+        first_label, first_actual = mismatched[0]
+        more = f" (+{len(mismatched) - 1} more)" if len(mismatched) > 1 else ""
+        return _fix(
+            row,
+            f'Expected "{row.builder_input}", but {first_label} is "{first_actual}"{more}',
+        )
+    if unparseable:
+        label, raw = unparseable[0]
+        return _review(
+            row, f'Ad set status "{raw}" on {label} not recognized. Verify manually.'
+        )
+    if missing:
+        # All ad sets were missing the field — pure Review, no signal.
+        if len(missing) == len(ad_sets):
+            return _review(
+                row,
+                "Ad set status not available in BigQuery for any ad set; verify manually.",
+            )
+        # Some had it and matched, some didn't — still a Pass on what we saw,
+        # but flag the partial coverage so the builder knows.
+        return _pass(row, f"({len(missing)} of {len(ad_sets)} ad sets missing status)")
+    return _pass(row)
+
+
+# --- adset_start_date / adset_end_date -------------------------------------
+
+
+def _check_adset_date_field(
+    row: CheckRow,
+    *,
+    evidence: dict[str, Any] | None,
+    field: str,
+    label: str,
+) -> CheckResult:
+    ad_sets = _ad_sets(evidence)
+    if not ad_sets:
+        return _review(row, "No ad sets found in BigQuery for this campaign.")
+
+    expected_date = _parse_date(row.builder_input)
+    if expected_date is None:
+        return _review(
+            row,
+            f'Could not parse the expected {label} "{row.builder_input}". '
+            "Use YYYY-MM-DD or MM/DD/YYYY.",
+        )
+
+    mismatched: list[tuple[str, str]] = []
+    unparseable: list[tuple[str, str]] = []
+    missing: list[str] = []
+
+    for adset in ad_sets:
+        actual = adset.get(field)
+        if _is_blank(actual):
+            missing.append(_adset_label(adset))
+            continue
+        actual_date = _parse_date(actual)
+        if actual_date is None:
+            unparseable.append((_adset_label(adset), str(actual)))
+            continue
+        if actual_date != expected_date:
+            mismatched.append((_adset_label(adset), actual_date.isoformat()))
+
+    if mismatched:
+        first_label, first_actual = mismatched[0]
+        more = f" (+{len(mismatched) - 1} more)" if len(mismatched) > 1 else ""
+        return _fix(
+            row,
+            f"Expected {label} {expected_date.isoformat()}, "
+            f"but {first_label} is {first_actual}{more}",
+        )
+    if unparseable:
+        label_str, raw = unparseable[0]
+        return _review(
+            row,
+            f'Ad set {label} "{raw}" on {label_str} could not be parsed. Verify manually.',
+        )
+    if missing:
+        if len(missing) == len(ad_sets):
+            return _review(
+                row,
+                f"Ad set {label} not available in BigQuery for any ad set; verify manually.",
+            )
+        return _pass(row, f"({len(missing)} of {len(ad_sets)} ad sets missing {label})")
+    return _pass(row)
+
+
+def check_adset_start_date(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
+    return _check_adset_date_field(
+        row, evidence=evidence, field="start_time", label="start date"
+    )
+
+
+def check_adset_end_date(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
+    return _check_adset_date_field(
+        row, evidence=evidence, field="end_time", label="end date"
+    )
+
+
+# --- adset_age_min / adset_age_max -----------------------------------------
+#
+# Meta age fields are integers (`age_min`, `age_max` on the targeting RECORD).
+# Builders type integers too — just normalize and compare. Targeting can be
+# nested or flat per-client; `read_targeting` handles both.
+
+
+def _parse_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        # bool is a subclass of int — explicitly reject.
+        return None
+    if isinstance(value, int):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        try:
+            f = float(text)
+        except ValueError:
+            return None
+        if f.is_integer():
+            return int(f)
+        return None
+
+
+def _check_adset_age_field(
+    row: CheckRow,
+    *,
+    evidence: dict[str, Any] | None,
+    field: str,
+    label: str,
+) -> CheckResult:
+    ad_sets = _ad_sets(evidence)
+    if not ad_sets:
+        return _review(row, "No ad sets found in BigQuery for this campaign.")
+
+    expected = _parse_int(row.builder_input)
+    if expected is None:
+        return _review(
+            row,
+            f'Could not parse the expected {label} "{row.builder_input}" as an integer.',
+        )
+
+    mismatched: list[tuple[str, int]] = []
+    missing: list[str] = []
+
+    for adset in ad_sets:
+        targeting = read_targeting(adset)
+        actual = _parse_int(targeting.get(field))
+        if actual is None:
+            missing.append(_adset_label(adset))
+            continue
+        if actual != expected:
+            mismatched.append((_adset_label(adset), actual))
+
+    if mismatched:
+        first_label, first_actual = mismatched[0]
+        more = f" (+{len(mismatched) - 1} more)" if len(mismatched) > 1 else ""
+        return _fix(
+            row,
+            f"Expected {label} {expected}, but {first_label} is {first_actual}{more}",
+        )
+    if missing:
+        if len(missing) == len(ad_sets):
+            return _review(
+                row,
+                f"Ad set {label} not available in BigQuery targeting for any ad set; "
+                "verify manually.",
+            )
+        return _pass(row, f"({len(missing)} of {len(ad_sets)} ad sets missing {label})")
+    return _pass(row)
+
+
+def check_adset_age_min(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
+    return _check_adset_age_field(
+        row, evidence=evidence, field="age_min", label="age_min"
+    )
+
+
+def check_adset_age_max(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
+    return _check_adset_age_field(
+        row, evidence=evidence, field="age_max", label="age_max"
+    )
+
+
+# --- adset_genders ---------------------------------------------------------
+#
+# Meta encodes genders as int codes inside the targeting RECORD:
+#   [1]    = Men only
+#   [2]    = Women only
+#   [1, 2] = All (men + women)
+#   absent or empty = All (Meta's default, no targeting restriction)
+#
+# Builders type the friendly label. Compare canonical sets.
+
+
+_GENDER_SYNONYMS: dict[str, frozenset[int]] = {
+    "all": frozenset({1, 2}),
+    "all genders": frozenset({1, 2}),
+    "any": frozenset({1, 2}),
+    "everyone": frozenset({1, 2}),
+    "men and women": frozenset({1, 2}),
+    "women and men": frozenset({1, 2}),
+    "both": frozenset({1, 2}),
+    "men": frozenset({1}),
+    "male": frozenset({1}),
+    "males": frozenset({1}),
+    "m": frozenset({1}),
+    "women": frozenset({2}),
+    "female": frozenset({2}),
+    "females": frozenset({2}),
+    "f": frozenset({2}),
+}
+
+
+def _canonical_genders(value: Any) -> frozenset[int] | None:
+    """Return a frozenset of {1, 2} | {1} | {2}, or None if uninterpretable.
+
+    Accepts: builder strings ("Men", "All"), int lists ([1, 2]), or string lists.
+    Empty/missing maps to the Meta default of {1, 2} (all).
+    """
+    if value is None:
+        return frozenset({1, 2})
+    if isinstance(value, (list, tuple)):
+        if not value:
+            return frozenset({1, 2})
+        codes: set[int] = set()
+        for item in value:
+            i = _parse_int(item)
+            if i not in (1, 2):
+                return None
+            codes.add(i)
+        return frozenset(codes) if codes else None
+    text = _norm(value)
+    if not text:
+        return frozenset({1, 2})
+    return _GENDER_SYNONYMS.get(text)
+
+
+def _format_genders(codes: frozenset[int]) -> str:
+    if codes == frozenset({1, 2}):
+        return "All"
+    if codes == frozenset({1}):
+        return "Men"
+    if codes == frozenset({2}):
+        return "Women"
+    return str(sorted(codes))
+
+
+def check_adset_genders(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
+    ad_sets = _ad_sets(evidence)
+    if not ad_sets:
+        return _review(row, "No ad sets found in BigQuery for this campaign.")
+
+    expected = _canonical_genders(row.builder_input)
+    if expected is None:
+        return _review(
+            row,
+            f'Could not interpret the expected genders "{row.builder_input}". '
+            "Use Men, Women, or All.",
+        )
+
+    mismatched: list[tuple[str, str]] = []
+    unparseable: list[tuple[str, str]] = []
+
+    for adset in ad_sets:
+        targeting = read_targeting(adset)
+        raw = targeting.get("genders")
+        actual = _canonical_genders(raw)
+        if actual is None:
+            unparseable.append((_adset_label(adset), str(raw)))
+            continue
+        if actual != expected:
+            mismatched.append((_adset_label(adset), _format_genders(actual)))
+
+    if mismatched:
+        first_label, first_actual = mismatched[0]
+        more = f" (+{len(mismatched) - 1} more)" if len(mismatched) > 1 else ""
+        return _fix(
+            row,
+            f"Expected {_format_genders(expected)}, "
+            f"but {first_label} targets {first_actual}{more}",
+        )
+    if unparseable:
+        label, raw = unparseable[0]
+        return _review(
+            row, f'Ad set genders "{raw}" on {label} not recognized. Verify manually.'
+        )
+    return _pass(row)
+
+
+# --- adset_countries -------------------------------------------------------
+#
+# Meta stores location targeting as ISO-3166-1 alpha-2 codes in
+# `targeting.countries` (list of strings). Builders may type codes ("US, CA")
+# or full names ("United States, Canada"). We normalize both sides to a set of
+# upper-case 2-letter codes for comparison.
+
+
+_COUNTRY_NAME_TO_CODE = {
+    "united states": "US",
+    "united states of america": "US",
+    "usa": "US",
+    "us": "US",
+    "u s": "US",
+    "u s a": "US",
+    "canada": "CA",
+    "mexico": "MX",
+    "united kingdom": "GB",
+    "uk": "GB",
+    "great britain": "GB",
+    "england": "GB",
+    "australia": "AU",
+    "new zealand": "NZ",
+    "ireland": "IE",
+    "france": "FR",
+    "germany": "DE",
+    "spain": "ES",
+    "italy": "IT",
+    "netherlands": "NL",
+    "belgium": "BE",
+    "japan": "JP",
+    "china": "CN",
+    "india": "IN",
+    "brazil": "BR",
+    "argentina": "AR",
+    "south africa": "ZA",
+}
+
+
+def _canonical_country(token: Any) -> str:
+    """Normalize a single country token to its ISO-3166-1 alpha-2 code, or '' if
+    we can't confidently map it."""
+    if token is None:
+        return ""
+    text = str(token).strip()
+    if not text:
+        return ""
+    # Already a 2-letter code.
+    if len(text) == 2 and text.isalpha():
+        return text.upper()
+    # Try the friendly-name map (underscores/casing already normalized by _norm).
+    return _COUNTRY_NAME_TO_CODE.get(_norm(text), "")
+
+
+def _parse_country_set(value: Any) -> set[str] | None:
+    """Parse builder input or BQ value into a set of alpha-2 codes. Returns None
+    if any token in a list is unrecognized, so we can Review rather than
+    silently passing on a partial match."""
+    if value is None:
+        return set()
+    if isinstance(value, (list, tuple)):
+        tokens = [str(t) for t in value if not _is_blank(t)]
+    else:
+        tokens = [t.strip() for t in str(value).split(",") if t.strip()]
+    if not tokens:
+        return set()
+    codes: set[str] = set()
+    for token in tokens:
+        code = _canonical_country(token)
+        if not code:
+            return None
+        codes.add(code)
+    return codes
+
+
+def check_adset_countries(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
+    ad_sets = _ad_sets(evidence)
+    if not ad_sets:
+        return _review(row, "No ad sets found in BigQuery for this campaign.")
+
+    expected = _parse_country_set(row.builder_input)
+    if expected is None or not expected:
+        return _review(
+            row,
+            f'Could not interpret the expected countries "{row.builder_input}". '
+            "Use ISO codes (US, CA) or full names.",
+        )
+
+    mismatched: list[tuple[str, set[str]]] = []
+    unparseable: list[tuple[str, str]] = []
+    missing: list[str] = []
+
+    for adset in ad_sets:
+        targeting = read_targeting(adset)
+        raw = targeting.get("countries")
+        if _is_blank(raw) and not isinstance(raw, (list, tuple)):
+            missing.append(_adset_label(adset))
+            continue
+        actual = _parse_country_set(raw)
+        if actual is None:
+            unparseable.append((_adset_label(adset), str(raw)))
+            continue
+        if actual != expected:
+            mismatched.append((_adset_label(adset), actual))
+
+    if mismatched:
+        first_label, first_actual = mismatched[0]
+        more = f" (+{len(mismatched) - 1} more)" if len(mismatched) > 1 else ""
+        return _fix(
+            row,
+            f"Expected countries {sorted(expected)}, "
+            f"but {first_label} targets {sorted(first_actual)}{more}",
+        )
+    if unparseable:
+        label, raw = unparseable[0]
+        return _review(
+            row, f'Ad set countries "{raw}" on {label} not recognized. Verify manually.'
+        )
+    if missing:
+        if len(missing) == len(ad_sets):
+            return _review(
+                row,
+                "Ad set countries not available in BigQuery targeting for any ad set; "
+                "verify manually.",
+            )
+        return _pass(row, f"({len(missing)} of {len(ad_sets)} ad sets missing countries)")
+    return _pass(row)

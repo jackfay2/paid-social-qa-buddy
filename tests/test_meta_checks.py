@@ -3,6 +3,13 @@
 from __future__ import annotations
 
 from app.checks.meta_checks import (
+    check_adset_age_max,
+    check_adset_age_min,
+    check_adset_countries,
+    check_adset_end_date,
+    check_adset_genders,
+    check_adset_start_date,
+    check_adset_status,
     check_campaign_bid_strategy,
     check_campaign_buying_type,
     check_campaign_objective,
@@ -19,6 +26,11 @@ def _row(check_id: str, builder_input: str) -> CheckRow:
 
 def _evidence(campaign: dict) -> dict:
     return {"campaign": campaign, "ad_sets": [], "ads": []}
+
+
+def _adset_evidence(ad_sets: list[dict]) -> dict:
+    """Evidence shaped for ad-set-level checks. Campaign field is irrelevant."""
+    return {"campaign": {}, "ad_sets": ad_sets, "ads": []}
 
 
 # --- campaign_objective ----------------------------------------------------
@@ -243,6 +255,302 @@ def test_bid_strategy_unrecognized_expected_is_review() -> None:
     assert result.verdict == "Review"
 
 
+# --- adset_status ----------------------------------------------------------
+
+
+def test_adset_status_all_active_matches_live() -> None:
+    row = _row("adset_status", "Live")
+    result = check_adset_status(
+        row,
+        evidence=_adset_evidence(
+            [
+                {"id": 1, "effective_status": "ACTIVE"},
+                {"id": 2, "effective_status": "ACTIVE"},
+            ]
+        ),
+    )
+    assert result.verdict == "Pass"
+
+
+def test_adset_status_one_diverges_is_fix_with_adset_label() -> None:
+    row = _row("adset_status", "Live")
+    result = check_adset_status(
+        row,
+        evidence=_adset_evidence(
+            [
+                {"id": 1, "name": "Adset A", "effective_status": "ACTIVE"},
+                {"id": 2, "name": "Adset B", "effective_status": "PAUSED"},
+            ]
+        ),
+    )
+    assert result.verdict == "Fix"
+    assert "Adset B" in result.action
+    assert "PAUSED" in result.action
+
+
+def test_adset_status_multiple_mismatches_summarized() -> None:
+    row = _row("adset_status", "Live")
+    result = check_adset_status(
+        row,
+        evidence=_adset_evidence(
+            [
+                {"id": 1, "effective_status": "PAUSED"},
+                {"id": 2, "effective_status": "PAUSED"},
+            ]
+        ),
+    )
+    assert result.verdict == "Fix"
+    assert "+1 more" in result.action
+
+
+def test_adset_status_no_ad_sets_is_review() -> None:
+    row = _row("adset_status", "Live")
+    result = check_adset_status(row, evidence=_adset_evidence([]))
+    assert result.verdict == "Review"
+    assert "no ad sets" in result.action.lower()
+
+
+def test_adset_status_all_missing_is_review() -> None:
+    row = _row("adset_status", "Live")
+    result = check_adset_status(
+        row, evidence=_adset_evidence([{"id": 1}, {"id": 2}])
+    )
+    assert result.verdict == "Review"
+    assert "not available" in result.action.lower()
+
+
+def test_adset_status_unrecognized_expected_is_review() -> None:
+    row = _row("adset_status", "purple")
+    result = check_adset_status(
+        row, evidence=_adset_evidence([{"id": 1, "effective_status": "ACTIVE"}])
+    )
+    assert result.verdict == "Review"
+
+
+# --- adset_start_date / adset_end_date -------------------------------------
+
+
+def test_adset_start_date_match_passes() -> None:
+    row = _row("adset_start_date", "10/05/2024")
+    result = check_adset_start_date(
+        row, evidence=_adset_evidence([{"id": 1, "start_time": "2024-10-05 12:30:00"}])
+    )
+    assert result.verdict == "Pass"
+
+
+def test_adset_start_date_mismatch_is_fix() -> None:
+    row = _row("adset_start_date", "10/05/2024")
+    result = check_adset_start_date(
+        row,
+        evidence=_adset_evidence(
+            [
+                {"id": 1, "name": "Adset A", "start_time": "2024-10-05"},
+                {"id": 2, "name": "Adset B", "start_time": "2024-11-15"},
+            ]
+        ),
+    )
+    assert result.verdict == "Fix"
+    assert "Adset B" in result.action
+
+
+def test_adset_end_date_match_passes() -> None:
+    row = _row("adset_end_date", "2024-12-31")
+    result = check_adset_end_date(
+        row,
+        evidence=_adset_evidence(
+            [
+                {"id": 1, "end_time": "2024-12-31T23:59:59"},
+                {"id": 2, "end_time": "2024-12-31"},
+            ]
+        ),
+    )
+    assert result.verdict == "Pass"
+
+
+def test_adset_end_date_all_missing_is_review() -> None:
+    row = _row("adset_end_date", "2024-12-31")
+    result = check_adset_end_date(
+        row, evidence=_adset_evidence([{"id": 1}, {"id": 2}])
+    )
+    assert result.verdict == "Review"
+
+
+def test_adset_start_date_unparseable_expected_is_review() -> None:
+    row = _row("adset_start_date", "next tuesday")
+    result = check_adset_start_date(
+        row, evidence=_adset_evidence([{"id": 1, "start_time": "2024-10-05"}])
+    )
+    assert result.verdict == "Review"
+
+
+# --- adset_age_min / adset_age_max -----------------------------------------
+
+
+def test_adset_age_min_nested_targeting_match_passes() -> None:
+    row = _row("adset_age_min", "18")
+    result = check_adset_age_min(
+        row,
+        evidence=_adset_evidence(
+            [{"id": 1, "targeting": {"age_min": 18, "age_max": 65}}]
+        ),
+    )
+    assert result.verdict == "Pass"
+
+
+def test_adset_age_min_flat_schema_match_passes() -> None:
+    """Some clients store targeting as flat columns — read_targeting handles it."""
+    row = _row("adset_age_min", "25")
+    result = check_adset_age_min(
+        row, evidence=_adset_evidence([{"id": 1, "age_min": 25, "age_max": 45}])
+    )
+    assert result.verdict == "Pass"
+
+
+def test_adset_age_max_mismatch_is_fix() -> None:
+    row = _row("adset_age_max", "65")
+    result = check_adset_age_max(
+        row,
+        evidence=_adset_evidence(
+            [
+                {"id": 1, "name": "Adset A", "targeting": {"age_max": 65}},
+                {"id": 2, "name": "Adset B", "targeting": {"age_max": 45}},
+            ]
+        ),
+    )
+    assert result.verdict == "Fix"
+    assert "Adset B" in result.action
+    assert "45" in result.action
+
+
+def test_adset_age_min_missing_targeting_is_review() -> None:
+    row = _row("adset_age_min", "18")
+    result = check_adset_age_min(
+        row, evidence=_adset_evidence([{"id": 1, "name": "Adset A"}])
+    )
+    assert result.verdict == "Review"
+
+
+def test_adset_age_min_non_integer_expected_is_review() -> None:
+    row = _row("adset_age_min", "young adults")
+    result = check_adset_age_min(
+        row, evidence=_adset_evidence([{"id": 1, "targeting": {"age_min": 18}}])
+    )
+    assert result.verdict == "Review"
+
+
+# --- adset_genders ---------------------------------------------------------
+
+
+def test_adset_genders_all_label_matches_meta_default() -> None:
+    """Meta absent/empty = all; builder typed 'All' = {1, 2}."""
+    row = _row("adset_genders", "All")
+    result = check_adset_genders(
+        row,
+        evidence=_adset_evidence(
+            [
+                {"id": 1, "targeting": {"genders": [1, 2]}},
+                {"id": 2, "targeting": {}},  # absent → all
+            ]
+        ),
+    )
+    assert result.verdict == "Pass"
+
+
+def test_adset_genders_men_only_matches() -> None:
+    row = _row("adset_genders", "Men")
+    result = check_adset_genders(
+        row, evidence=_adset_evidence([{"id": 1, "targeting": {"genders": [1]}}])
+    )
+    assert result.verdict == "Pass"
+
+
+def test_adset_genders_women_only_mismatch_is_fix() -> None:
+    row = _row("adset_genders", "Women")
+    result = check_adset_genders(
+        row,
+        evidence=_adset_evidence(
+            [{"id": 1, "name": "Adset A", "targeting": {"genders": [1]}}]
+        ),
+    )
+    assert result.verdict == "Fix"
+    assert "Men" in result.action
+    assert "Women" in result.action
+
+
+def test_adset_genders_unknown_label_is_review() -> None:
+    row = _row("adset_genders", "everybody who clicks")
+    result = check_adset_genders(
+        row, evidence=_adset_evidence([{"id": 1, "targeting": {"genders": [1, 2]}}])
+    )
+    assert result.verdict == "Review"
+
+
+def test_adset_genders_unparseable_actual_is_review() -> None:
+    row = _row("adset_genders", "Men")
+    result = check_adset_genders(
+        row, evidence=_adset_evidence([{"id": 1, "targeting": {"genders": [99]}}])
+    )
+    assert result.verdict == "Review"
+
+
+# --- adset_countries -------------------------------------------------------
+
+
+def test_adset_countries_iso_codes_match_passes() -> None:
+    row = _row("adset_countries", "US, CA")
+    result = check_adset_countries(
+        row,
+        evidence=_adset_evidence([{"id": 1, "targeting": {"countries": ["US", "CA"]}}]),
+    )
+    assert result.verdict == "Pass"
+
+
+def test_adset_countries_full_name_matches_iso_code() -> None:
+    """'United States' on builder side maps to 'US' in BQ."""
+    row = _row("adset_countries", "United States")
+    result = check_adset_countries(
+        row, evidence=_adset_evidence([{"id": 1, "targeting": {"countries": ["US"]}}])
+    )
+    assert result.verdict == "Pass"
+
+
+def test_adset_countries_order_independent() -> None:
+    row = _row("adset_countries", "CA, US")
+    result = check_adset_countries(
+        row,
+        evidence=_adset_evidence([{"id": 1, "targeting": {"countries": ["US", "CA"]}}]),
+    )
+    assert result.verdict == "Pass"
+
+
+def test_adset_countries_extra_country_is_fix() -> None:
+    row = _row("adset_countries", "US")
+    result = check_adset_countries(
+        row,
+        evidence=_adset_evidence(
+            [{"id": 1, "name": "Adset A", "targeting": {"countries": ["US", "MX"]}}]
+        ),
+    )
+    assert result.verdict == "Fix"
+    assert "Adset A" in result.action
+
+
+def test_adset_countries_unknown_input_is_review() -> None:
+    row = _row("adset_countries", "Atlantis")
+    result = check_adset_countries(
+        row, evidence=_adset_evidence([{"id": 1, "targeting": {"countries": ["US"]}}])
+    )
+    assert result.verdict == "Review"
+
+
+def test_adset_countries_all_missing_is_review() -> None:
+    row = _row("adset_countries", "US")
+    result = check_adset_countries(
+        row, evidence=_adset_evidence([{"id": 1, "targeting": {}}])
+    )
+    assert result.verdict == "Review"
+
+
 # --- registry integration --------------------------------------------------
 
 
@@ -252,6 +560,14 @@ def test_checks_registered() -> None:
     assert "campaign_status" in CHECK_REGISTRY
     assert "campaign_start_date" in CHECK_REGISTRY
     assert "campaign_bid_strategy" in CHECK_REGISTRY
+    # Ad-set checks
+    assert "adset_status" in CHECK_REGISTRY
+    assert "adset_start_date" in CHECK_REGISTRY
+    assert "adset_end_date" in CHECK_REGISTRY
+    assert "adset_age_min" in CHECK_REGISTRY
+    assert "adset_age_max" in CHECK_REGISTRY
+    assert "adset_genders" in CHECK_REGISTRY
+    assert "adset_countries" in CHECK_REGISTRY
 
 
 def test_run_check_dispatches_to_objective() -> None:
