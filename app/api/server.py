@@ -24,7 +24,7 @@ from app.api.task_auth import (
     TaskAuthSettings,
     verify_cloud_task_request,
 )
-from app.config import load_settings
+from app.config import diagnostics_from_settings, load_settings
 from app.core.orchestration import OrchestrationRequest, OrchestrationResult
 from app.logging_config import configure_logging
 
@@ -57,10 +57,56 @@ def healthz() -> dict[str, str]:
 
 
 @app.get("/readyz")
-def readyz() -> dict[str, object]:
-    settings = load_settings()
-    return {
-        "status": "ready",
+def readyz() -> JSONResponse:
+    """Readiness probe. Cloud Run gates traffic on this (CLAUDE.md: trust
+    /readyz for rollout health, not CLI success text).
+
+    Returns 503 when startup config is broken — most importantly when a Secret
+    Manager indirection failed to resolve. Without this, a revision with a bad
+    secret name or missing `roles/secretmanager.secretAccessor` IAM would boot
+    green and then fail per-request the first time it needs the Sheets SA JSON.
+    Failing the readiness probe instead keeps the broken revision from ever
+    taking traffic.
+
+    The response never includes secret *values* — only the secret name,
+    destination key, and error code/message, which are safe to surface.
+    """
+    try:
+        settings = load_settings()
+        diagnostics = diagnostics_from_settings(settings)
+    except Exception as exc:  # noqa: BLE001 — a probe must answer, not 500
+        _LOGGER.error("readyz_settings_load_failed", extra={"error": str(exc)})
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "not_ready",
+                "error_code": "settings_load_failed",
+                "message": str(exc),
+            },
+        )
+
+    secret_errors = [
+        {
+            "key": err.key,
+            "secret_name": err.secret_name,
+            "error_code": err.error_code,
+            "message": err.message,
+        }
+        for err in diagnostics.secret_resolution_errors
+    ]
+    ready = not secret_errors
+
+    if not ready:
+        _LOGGER.error(
+            "readyz_not_ready",
+            extra={
+                "error_count": len(secret_errors),
+                "error_codes": [e["error_code"] for e in secret_errors],
+            },
+        )
+
+    body: dict[str, object] = {
+        "status": "ready" if ready else "not_ready",
         "service_role": settings.qa_service_role,
         "config": {
             "bq_meta_project": settings.bq_meta_project,
@@ -68,7 +114,13 @@ def readyz() -> dict[str, object]:
             "qa_run_store_backend": settings.qa_run_store_backend,
             "cloud_tasks_auth_required": settings.qa_cloud_tasks_auth_required,
         },
+        "secrets": {
+            "secret_manager_enabled": diagnostics.secret_manager_enabled,
+            "fetched_keys": diagnostics.fetched_secret_keys,
+            "errors": secret_errors,
+        },
     }
+    return JSONResponse(status_code=200 if ready else 503, content=body)
 
 
 @app.post("/tasks/qa/run", response_model=SocialTaskResponse)
