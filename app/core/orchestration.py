@@ -26,12 +26,13 @@ from uuid import uuid4
 
 from app.core.contracts import (
     AccountResolver,
+    GeminiClient,
     MetaDataClient,
     RunRecord,
     RunStore,
     SheetClient,
 )
-from app.core.pipeline import build_summary, execute_checks
+from app.core.pipeline import build_summary, execute_checks, execute_text_checks
 from app.models import CheckResult
 
 _logger = logging.getLogger("paid_social_qa_buddy.orchestration")
@@ -80,6 +81,7 @@ class SocialQAOrchestrationService:
         meta_client: MetaDataClient,
         sheet_client: SheetClient,
         check_runner: CheckRunner,
+        gemini_client: GeminiClient | None = None,
         qa_initial: str = "QA-BOT",
         fix_items_limit: int = 5,
     ) -> None:
@@ -88,6 +90,9 @@ class SocialQAOrchestrationService:
         self.meta_client = meta_client
         self.sheet_client = sheet_client
         self.check_runner = check_runner
+        # Optional: when None, text checks are skipped silently. Lets the local
+        # dev path run without a Gemini key (existing tests don't pass one).
+        self.gemini_client = gemini_client
         self.qa_initial = qa_initial
         self.fix_items_limit = fix_items_limit
 
@@ -206,8 +211,19 @@ class SocialQAOrchestrationService:
                 record, f"Failed to read the QA sheet: {exc}", "sheet_read_failed"
             )
 
-        # 6. Run deterministic checks. (Gemini text checks come in a later increment.)
+        # 6. Run deterministic checks.
         results = execute_checks(rows, self.check_runner, evidence=evidence)
+
+        # 6b. Text checks via Gemini — one batched call across the whole job
+        # (cost + latency). No-op when no gemini_client is wired, so the local
+        # path without an API key still passes through cleanly. Failures inside
+        # the adapter degrade to Review per the Peacock-Olympics rule; only
+        # truly unexpected exceptions bubble here and become "internal_error".
+        if self.gemini_client is not None:
+            text_results = execute_text_checks(
+                rows, evidence.get("ads", []), self.gemini_client
+            )
+            results.extend(text_results)
 
         # 7. Write verdicts back to the sheet (batched).
         try:

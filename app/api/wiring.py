@@ -12,6 +12,7 @@ from app.adapters.bigquery import (
     BigQueryMetaConfig,
     ResolverConfig,
 )
+from app.adapters.gemini import GeminiClient, GeminiConfig, StubGeminiClient
 from app.adapters.sheets import GoogleSheetsClient, GoogleSheetsConfig
 from app.adapters.slack import SlackClient, SlackConfig
 from app.adapters.storage import FirestoreRunStore, InMemoryRunStore
@@ -33,6 +34,24 @@ def build_run_store(settings: Settings):
     )
 
 
+def build_gemini_client(settings: Settings):
+    """Return a real GeminiClient when an API key is configured; otherwise the
+    stub (every text check → Review). Keeps the local/test path runnable
+    without a key, and never auto-Passes when Gemini isn't reachable.
+    """
+    api_key = (settings.gemini_api_key or "").strip()
+    if not api_key:
+        return StubGeminiClient()
+    return GeminiClient(
+        config=GeminiConfig(
+            api_key=api_key,
+            model=settings.qa_gemini_model,
+            timeout_seconds=settings.qa_gemini_timeout_seconds,
+            confidence_threshold=settings.qa_gemini_confidence_threshold,
+        )
+    )
+
+
 def build_orchestration_service(settings: Settings) -> SocialQAOrchestrationService:
     return SocialQAOrchestrationService(
         run_store=build_run_store(settings),
@@ -51,6 +70,7 @@ def build_orchestration_service(settings: Settings) -> SocialQAOrchestrationServ
             )
         ),
         check_runner=run_check,
+        gemini_client=build_gemini_client(settings),
         qa_initial=settings.qa_bot_initial,
     )
 

@@ -119,6 +119,88 @@ def test_evidence_passed_to_checks() -> None:
     assert "ads" in captured["evidence"]
 
 
+# --- text checks (Gemini wiring) -------------------------------------------
+
+
+def test_gemini_text_check_result_in_run_output(monkeypatch) -> None:
+    """When gemini_client is wired and a text-check row is present, the result
+    flows through orchestration → sheet write → summary counts."""
+    from app.checks import text_checks as text_checks_module
+    from app.core.orchestration import SocialQAOrchestrationService
+
+    monkeypatch.setattr(
+        text_checks_module,
+        "TEXT_CHECK_DEFINITIONS",
+        {
+            "creative_spelling": text_checks_module.TextCheckDefinition(
+                check_id="creative_spelling",
+                instruction="Spellcheck?",
+                ad_field="creative.body",
+            )
+        },
+    )
+
+    rows = [CheckRow(row_index=3, check_id="creative_spelling", builder_input="no typos")]
+    gemini_calls = []
+
+    class _Gemini:
+        def run_text_checks(self, batch):
+            gemini_calls.append(batch)
+            return {
+                "check_results": {
+                    batch[0]["check_id"]: {
+                        "verdict": "Fix",
+                        "action": "Typo found",
+                        "confidence": 0.95,
+                    }
+                }
+            }
+
+    service, _store, _resolver, meta, sheet = _make_service(rows=rows)
+    meta.get_ads.return_value = [{"id": "ad1", "name": "Ad A", "creative": {"body": "Recieve"}}]
+    # Re-create the service with gemini wired — _make_service doesn't accept it.
+    wired = SocialQAOrchestrationService(
+        run_store=service.run_store,
+        resolver=service.resolver,
+        meta_client=service.meta_client,
+        sheet_client=service.sheet_client,
+        check_runner=service.check_runner,
+        gemini_client=_Gemini(),
+    )
+    result = wired.run(_request())
+
+    assert result.status == "completed"
+    assert result.summary_counts["fix"] == 1
+    assert any("Ad A" in item for item in result.fix_items)
+    assert len(gemini_calls) == 1
+
+
+def test_no_gemini_client_means_text_checks_skipped() -> None:
+    """With gemini_client=None (existing default), text-check rows return no
+    results — they're skipped at execute_checks and execute_text_checks both."""
+    from app.checks import text_checks as text_checks_module
+
+    # Use monkeypatch via the standard pattern but keep it scoped.
+    original = dict(text_checks_module.TEXT_CHECK_DEFINITIONS)
+    text_checks_module.TEXT_CHECK_DEFINITIONS["creative_spelling"] = (
+        text_checks_module.TextCheckDefinition(
+            check_id="creative_spelling",
+            instruction="Spellcheck?",
+            ad_field="creative.body",
+        )
+    )
+    try:
+        rows = [CheckRow(row_index=3, check_id="creative_spelling", builder_input="no typos")]
+        service, *_ = _make_service(rows=rows)  # gemini_client default = None
+        result = service.run(_request())
+        # No results at all → summary is all zeros.
+        assert result.summary_counts == {"pass": 0, "fix": 0, "review": 0, "na": 0, "error": 0}
+        assert result.status == "completed"
+    finally:
+        text_checks_module.TEXT_CHECK_DEFINITIONS.clear()
+        text_checks_module.TEXT_CHECK_DEFINITIONS.update(original)
+
+
 # --- dedup -----------------------------------------------------------------
 
 
