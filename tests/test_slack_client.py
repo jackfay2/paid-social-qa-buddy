@@ -86,6 +86,42 @@ def test_post_thread_message_success() -> None:
     assert body["text"] == "QA complete | Pass 10 | Fix 1"
 
 
+# --- Top-level (channel) vs threaded post ----------------------------------
+
+
+def test_blank_thread_ts_posts_top_level_without_thread_key() -> None:
+    """A blank thread_ts means a top-level channel post — thread_ts must be
+    omitted from the body entirely (Slack rejects an empty string)."""
+    http = _make_http_client(_make_response(200, {"ok": True, "ts": "1.2"}))
+    client = _make_client(http)
+
+    client.post_thread_message(channel_id="C123", thread_ts="", text="hello")
+
+    body = http.post.call_args.kwargs["json"]
+    assert body["channel"] == "C123"
+    assert body["text"] == "hello"
+    assert "thread_ts" not in body
+
+
+def test_whitespace_thread_ts_treated_as_top_level() -> None:
+    http = _make_http_client(_make_response(200, {"ok": True}))
+    client = _make_client(http)
+
+    client.post_thread_message(channel_id="C123", thread_ts="   ", text="hi")
+
+    assert "thread_ts" not in http.post.call_args.kwargs["json"]
+
+
+def test_default_thread_ts_is_top_level() -> None:
+    """thread_ts is now optional; omitting it posts to the channel."""
+    http = _make_http_client(_make_response(200, {"ok": True}))
+    client = _make_client(http)
+
+    client.post_thread_message(channel_id="C123", text="hi")
+
+    assert "thread_ts" not in http.post.call_args.kwargs["json"]
+
+
 # --- HTTP errors -----------------------------------------------------------
 
 

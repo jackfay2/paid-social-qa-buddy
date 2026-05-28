@@ -85,9 +85,13 @@ class SlackClient:
         self._http = http_client or httpx.Client(timeout=config.timeout_seconds)
 
     def post_thread_message(
-        self, *, channel_id: str, thread_ts: str, text: str,
+        self, *, channel_id: str, thread_ts: str = "", text: str,
     ) -> None:
-        """Post a message into a Slack thread.
+        """Post a message to a Slack channel, optionally in a thread.
+
+        When `thread_ts` is non-blank the message is posted as a threaded reply;
+        when blank it is posted as a top-level channel message (Slack rejects an
+        empty thread_ts, so we omit the key rather than send "").
 
         Raises SlackPostError on any failure. Caller decides retry/terminal
         based on the error's `.code` (use is_transient() for the canonical
@@ -99,9 +103,10 @@ class SlackClient:
         }
         body = {
             "channel": channel_id,
-            "thread_ts": thread_ts,
             "text": text,
         }
+        if thread_ts and thread_ts.strip():
+            body["thread_ts"] = thread_ts
 
         try:
             response = self._http.post(
