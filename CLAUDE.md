@@ -23,7 +23,8 @@ Maya Gundepudi (Search QA Buddy owner) is handing off the Paid Social extension 
 ## Architecture (locked)
 
 - **Shared listener, split workers per platform.** Slack physics: one Slack app `@qa-buddy` → one Events API URL → one listener service. Listener reads `platform` field from the parsed message and enqueues to the platform-specific Cloud Tasks queue.
-- **Existing repo (Maya's, hosts the listener):** listener + Search worker stay there. Maya makes the `platform` routing change in her repo.
+- **Existing repo (Maya's, hosts the listener):** listener + Search worker stay there. Maya makes the `platform` routing change in her repo (eventually).
+- **Test setup (decided 2026-05-28):** for validation, Maya and Jack are copying her test listener into a new test service with the Social changes added, running in a separate test Slack workspace. Lets the two listeners run side-by-side in test without touching her Search test flow. Once green, the Social changes get merged back into Maya's main listener for production (per Brad's "share the Slack app" rule). So the prod listener stays unified; the test path is a parallel branch.
 - **Social repo (Jack's, built):** `github.com/jackfay2/paid-social-qa-buddy`. Social worker + BigQuery adapter (Meta data) + account resolver + Polaris adapter (directory lookup) + check registry + orchestration + worker endpoint. Deploys its own Cloud Run worker. Receives tasks from `qa-buddy-runs-social` Cloud Tasks queue.
 - **Slack model:** `@-mention` with `key: value` lines (one field per line). Not slash commands. `@qa-buddy` is the shared mention.
 - **One shared Slack app** per Brad ("managing too many Slack apps is an overhead nightmare").
@@ -167,10 +168,14 @@ Lock these three in a shared doc before either repo ships changes. They are the 
 - ✗ Data layer validated end-to-end against live BigQuery (2026-05-27) — correct verdicts
 - ✗ Local Sheets auth → user-OAuth Sheets/Drive scopes are blocked on this Google Workspace; live sheets require the service account; local uses the in-memory sheet stand-in
 - ✗ Per-client BQ schema variance → confirmed real; `BigQueryMetaClient` uses `SELECT *` (see Data architecture)
+- ✗ Objective check value-map calibrated (2026-05-28) — per Brandon: match against ODAX, legacy Meta enums (CONVERSIONS, LEAD_GENERATION, PAGE_LIKES, etc.) map to their modern replacements
+- ✗ Test setup architecture → listener-copy in a separate test Slack workspace (see Architecture); production listener stays unified
 - Kerri's final `check_id` list — pending (Brandon is interim; template's checks + BQ fields are known, formal IDs TBD)
 - BigQuery field timing (Riley + Nikki sprint) — which of the ~16 missing fields land, and when
 - Daily-stale vs real-time — Airbyte syncs daily; confirm daily-stale acceptable, or whether direct Meta API needed for fresh-launch cases
-- BigQuery auth for the SA — `ppc-qa-buddy@...` needs `roles/bigquery.dataViewer` on `polaris-data-317717` for prod (Jack's personal ADC has read today)
+- BigQuery auth for the SA — `ppc-qa-buddy@...` needs `roles/bigquery.dataViewer` on `polaris-data-317717` for prod (Jack's personal ADC has read today). Companion grant: `roles/bigquery.jobUser` on `prj-prd-ai-ppc-qa-pkph`. Permission to add the binding likely sits with ai-team@ or the data-warehouse owners; settle ownership with Maya.
+- Sheets auth workaround — Maya mentioned (2026-05-28) the team has a workaround for not downloading the SA JSON key (org-blocked). Specifics TBD (service-account impersonation? shared credential? something else?). Need that from Maya before wiring the sheets adapter for live use.
+- GCP provisioning ownership — who creates the `qa-buddy-runs-social` queue, deploys `qa-buddy-worker-social{,-test}` to Cloud Run, and grants the IAM. Brad said ai-team@ has access to everything; specific person/process TBD.
 - "Ad Sets that Ads Should Be Live In" check — structural (ad→adset placement vs builder's expectation, per Brandon); Review-heavy for MVP unless the builder-input format is simple
 - ✗ Firestore collection → single `qa_runs` collection with `qa_app` field (FirestoreRunStore tags records `qa_app="social"`)
 
