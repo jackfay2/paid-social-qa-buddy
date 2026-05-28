@@ -87,6 +87,30 @@ def _adset_label(adset: dict[str, Any]) -> str:
     return f"ad set {adset_id}" if adset_id else "an ad set"
 
 
+def _ads(evidence: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Return the ads list from evidence, defensively coerced.
+
+    Ad-level checks interpret the builder input as "every ad must match this
+    expectation" — same multi-entity rule as ad-set checks. The exception is
+    aggregate checks (e.g. ad_count) which read the count directly.
+    """
+    if not isinstance(evidence, dict):
+        return []
+    ads = evidence.get("ads")
+    if not isinstance(ads, list):
+        return []
+    return [a for a in ads if isinstance(a, dict)]
+
+
+def _ad_label(ad: dict[str, Any]) -> str:
+    """Best-effort identifier for ad-level error messages."""
+    name = ad.get("name") or ad.get("ad_name")
+    if name:
+        return str(name)
+    ad_id = ad.get("id") or ad.get("ad_id")
+    return f"ad {ad_id}" if ad_id else "an ad"
+
+
 def _is_blank(value: Any) -> bool:
     return value is None or str(value).strip() == ""
 
@@ -859,4 +883,226 @@ def check_adset_countries(row: CheckRow, *, evidence: dict[str, Any] | None = No
                 "verify manually.",
             )
         return _pass(row, f"({len(missing)} of {len(ad_sets)} ad sets missing countries)")
+    return _pass(row)
+
+
+# === Ad-level checks ========================================================
+#
+# Same multi-entity rule as ad-set checks: "every ad must match this builder
+# expectation." If any ad diverges, Fix and point at that one. The exception is
+# aggregate checks (ad_count) which read the count directly.
+#
+# Creative is often sparse on paused/old ads (per the 2026-05-27 live finding),
+# so checks that read into creative.* fields skip ads with blank text rather
+# than misreporting them. The Peacock-Olympics rule still holds: never auto-Pass
+# on missing data.
+
+
+# --- ad_status -------------------------------------------------------------
+
+
+def check_ad_status(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
+    ads = _ads(evidence)
+    if not ads:
+        return _review(row, "No ads found in BigQuery for this campaign.")
+
+    expected = _canonical_status(row.builder_input)
+    if not expected:
+        return _review(
+            row,
+            f'Could not interpret the expected ad status "{row.builder_input}".',
+        )
+
+    mismatched: list[tuple[str, str]] = []
+    unparseable: list[tuple[str, str]] = []
+    missing: list[str] = []
+
+    for ad in ads:
+        actual = ad.get("effective_status")
+        if _is_blank(actual):
+            missing.append(_ad_label(ad))
+            continue
+        actual_canon = _canonical_status(actual)
+        if not actual_canon:
+            unparseable.append((_ad_label(ad), str(actual)))
+            continue
+        if actual_canon != expected:
+            mismatched.append((_ad_label(ad), str(actual)))
+
+    if mismatched:
+        first_label, first_actual = mismatched[0]
+        more = f" (+{len(mismatched) - 1} more)" if len(mismatched) > 1 else ""
+        return _fix(
+            row,
+            f'Expected "{row.builder_input}", but {first_label} is "{first_actual}"{more}',
+        )
+    if unparseable:
+        label, raw = unparseable[0]
+        return _review(
+            row, f'Ad status "{raw}" on {label} not recognized. Verify manually.'
+        )
+    if missing:
+        if len(missing) == len(ads):
+            return _review(
+                row,
+                "Ad status not available in BigQuery for any ad; verify manually.",
+            )
+        return _pass(row, f"({len(missing)} of {len(ads)} ads missing status)")
+    return _pass(row)
+
+
+# --- ad_count --------------------------------------------------------------
+#
+# Aggregate over the ads list — does the campaign have the expected number of
+# ads. Builder input is an integer. Unlike per-ad checks, an empty ads list is
+# a real Pass/Fix data point (e.g. "0 ads expected, 0 found = Pass"), not Review.
+
+
+def check_ad_count(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
+    expected = _parse_int(row.builder_input)
+    if expected is None or expected < 0:
+        return _review(
+            row,
+            f'Could not interpret the expected ad count "{row.builder_input}" as a non-negative integer.',
+        )
+
+    actual = len(_ads(evidence))
+    if actual == expected:
+        return _pass(row)
+    return _fix(
+        row,
+        f"Expected {expected} ad(s), but found {actual} in BigQuery.",
+    )
+
+
+# --- ad_destination_url ----------------------------------------------------
+#
+# Builders specify the destination URL the ads should drive to. Read defensively
+# from several common field paths because the BQ schema varies per client.
+# Strict comparison with light normalization (lowercase scheme/host, strip
+# trailing slash). UTMs / query params ARE significant — a mismatching UTM is
+# something the builder will want flagged. False Fix is recoverable; false Pass
+# is the Peacock-Olympics class.
+
+# Common locations the destination URL can show up in BQ. Order matters: first
+# non-blank wins per ad.
+_AD_URL_FIELDS = (
+    "link_url",
+    "destination_url",
+    "creative.link_url",
+    "creative.object_story_spec.link_data.link",
+    "object_story_spec.link_data.link",
+)
+
+
+def _read_path(record: Any, dotted: str) -> str:
+    """Read a (possibly nested) string value off `record`; "" if missing."""
+    if not isinstance(record, dict):
+        return ""
+    current: Any = record
+    for part in dotted.split("."):
+        if not isinstance(current, dict):
+            return ""
+        current = current.get(part)
+        if current is None:
+            return ""
+    return str(current).strip()
+
+
+def _read_ad_url(ad: dict[str, Any]) -> str:
+    """Return the first non-blank destination URL found on an ad."""
+    for path in _AD_URL_FIELDS:
+        value = _read_path(ad, path)
+        if value:
+            return value
+    return ""
+
+
+def _normalize_url(value: Any) -> str:
+    """Light, deterministic normalization for URL comparison.
+
+    Lowercases scheme + host; strips trailing slash on the path; preserves query
+    string and fragment exactly. Returns "" when the input doesn't look like a
+    URL — internal whitespace, no dot in the host, missing scheme/host. Callers
+    treat "" as "uninterpretable → Review", never a false Fix.
+    """
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    # Any internal whitespace means it wasn't a URL (e.g. "next tuesday",
+    # "::: not a url :::"). Be strict — false Fix is worse than false Review.
+    if any(c.isspace() for c in text):
+        return ""
+    # Default to https when scheme is omitted (builders often paste bare hosts).
+    if "://" not in text:
+        text = "https://" + text
+
+    from urllib.parse import urlsplit, urlunsplit
+
+    try:
+        parts = urlsplit(text)
+    except ValueError:
+        return ""
+    if not parts.scheme or not parts.netloc:
+        return ""
+    # Real ad destination hosts always have at least one dot (example.com,
+    # subdomain.example.co.uk, etc.). Excludes "localhost" and garbage netlocs
+    # that urlsplit accepts permissively.
+    if "." not in parts.netloc:
+        return ""
+
+    scheme = parts.scheme.lower()
+    netloc = parts.netloc.lower()
+    path = parts.path
+    if path.endswith("/") and len(path) > 1:
+        path = path.rstrip("/")
+    return urlunsplit((scheme, netloc, path, parts.query, parts.fragment))
+
+
+def check_ad_destination_url(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
+    ads = _ads(evidence)
+    if not ads:
+        return _review(row, "No ads found in BigQuery for this campaign.")
+
+    expected_norm = _normalize_url(row.builder_input)
+    if not expected_norm:
+        return _review(
+            row,
+            f'Could not parse the expected destination URL "{row.builder_input}".',
+        )
+
+    mismatched: list[tuple[str, str]] = []
+    missing: list[str] = []
+
+    for ad in ads:
+        raw = _read_ad_url(ad)
+        if not raw:
+            missing.append(_ad_label(ad))
+            continue
+        actual_norm = _normalize_url(raw)
+        if not actual_norm:
+            # Couldn't normalize an actual URL — treat as missing so we Review
+            # rather than emit a false Fix on a parser quirk.
+            missing.append(_ad_label(ad))
+            continue
+        if actual_norm != expected_norm:
+            mismatched.append((_ad_label(ad), raw))
+
+    if mismatched:
+        first_label, first_actual = mismatched[0]
+        more = f" (+{len(mismatched) - 1} more)" if len(mismatched) > 1 else ""
+        return _fix(
+            row,
+            f'Expected "{row.builder_input}", but {first_label} points to '
+            f'"{first_actual}"{more}',
+        )
+    if missing:
+        if len(missing) == len(ads):
+            return _review(
+                row,
+                "Destination URL not available in BigQuery for any ad; verify manually.",
+            )
+        return _pass(row, f"({len(missing)} of {len(ads)} ads missing destination URL)")
     return _pass(row)

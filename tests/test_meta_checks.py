@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from app.checks.meta_checks import (
+    check_ad_count,
+    check_ad_destination_url,
+    check_ad_status,
     check_adset_age_max,
     check_adset_age_min,
     check_adset_countries,
@@ -31,6 +34,11 @@ def _evidence(campaign: dict) -> dict:
 def _adset_evidence(ad_sets: list[dict]) -> dict:
     """Evidence shaped for ad-set-level checks. Campaign field is irrelevant."""
     return {"campaign": {}, "ad_sets": ad_sets, "ads": []}
+
+
+def _ad_evidence(ads: list[dict]) -> dict:
+    """Evidence shaped for ad-level checks. Campaign + ad_sets are irrelevant."""
+    return {"campaign": {}, "ad_sets": [], "ads": ads}
 
 
 # --- campaign_objective ----------------------------------------------------
@@ -551,6 +559,242 @@ def test_adset_countries_all_missing_is_review() -> None:
     assert result.verdict == "Review"
 
 
+# --- ad_status -------------------------------------------------------------
+
+
+def test_ad_status_all_active_passes() -> None:
+    row = _row("ad_status", "Live")
+    result = check_ad_status(
+        row,
+        evidence=_ad_evidence(
+            [
+                {"id": 1, "effective_status": "ACTIVE"},
+                {"id": 2, "effective_status": "ACTIVE"},
+            ]
+        ),
+    )
+    assert result.verdict == "Pass"
+
+
+def test_ad_status_one_diverges_is_fix() -> None:
+    row = _row("ad_status", "Live")
+    result = check_ad_status(
+        row,
+        evidence=_ad_evidence(
+            [
+                {"id": 1, "name": "Hero", "effective_status": "ACTIVE"},
+                {"id": 2, "name": "Variant B", "effective_status": "PAUSED"},
+            ]
+        ),
+    )
+    assert result.verdict == "Fix"
+    assert "Variant B" in result.action
+    assert "PAUSED" in result.action
+
+
+def test_ad_status_no_ads_is_review() -> None:
+    row = _row("ad_status", "Live")
+    result = check_ad_status(row, evidence=_ad_evidence([]))
+    assert result.verdict == "Review"
+
+
+def test_ad_status_all_missing_is_review() -> None:
+    row = _row("ad_status", "Live")
+    result = check_ad_status(
+        row, evidence=_ad_evidence([{"id": 1}, {"id": 2}])
+    )
+    assert result.verdict == "Review"
+
+
+def test_ad_status_unrecognized_expected_is_review() -> None:
+    row = _row("ad_status", "purple")
+    result = check_ad_status(
+        row, evidence=_ad_evidence([{"id": 1, "effective_status": "ACTIVE"}])
+    )
+    assert result.verdict == "Review"
+
+
+# --- ad_count --------------------------------------------------------------
+
+
+def test_ad_count_match_passes() -> None:
+    row = _row("ad_count", "3")
+    result = check_ad_count(
+        row, evidence=_ad_evidence([{"id": 1}, {"id": 2}, {"id": 3}])
+    )
+    assert result.verdict == "Pass"
+
+
+def test_ad_count_zero_match_passes() -> None:
+    """Zero is a legit data point — campaign with no ads, builder expects 0."""
+    row = _row("ad_count", "0")
+    result = check_ad_count(row, evidence=_ad_evidence([]))
+    assert result.verdict == "Pass"
+
+
+def test_ad_count_mismatch_is_fix() -> None:
+    row = _row("ad_count", "5")
+    result = check_ad_count(row, evidence=_ad_evidence([{"id": 1}, {"id": 2}]))
+    assert result.verdict == "Fix"
+    assert "5" in result.action
+    assert "2" in result.action
+
+
+def test_ad_count_non_integer_is_review() -> None:
+    row = _row("ad_count", "many")
+    result = check_ad_count(row, evidence=_ad_evidence([{"id": 1}]))
+    assert result.verdict == "Review"
+
+
+def test_ad_count_negative_is_review() -> None:
+    row = _row("ad_count", "-1")
+    result = check_ad_count(row, evidence=_ad_evidence([{"id": 1}]))
+    assert result.verdict == "Review"
+
+
+# --- ad_destination_url ----------------------------------------------------
+
+
+def test_ad_url_exact_match_passes() -> None:
+    row = _row("ad_destination_url", "https://example.com/products")
+    result = check_ad_destination_url(
+        row,
+        evidence=_ad_evidence(
+            [{"id": 1, "link_url": "https://example.com/products"}]
+        ),
+    )
+    assert result.verdict == "Pass"
+
+
+def test_ad_url_trailing_slash_normalized() -> None:
+    """Trailing slash on path is normalized away; same URL passes."""
+    row = _row("ad_destination_url", "https://example.com/products/")
+    result = check_ad_destination_url(
+        row,
+        evidence=_ad_evidence(
+            [{"id": 1, "link_url": "https://example.com/products"}]
+        ),
+    )
+    assert result.verdict == "Pass"
+
+
+def test_ad_url_scheme_and_host_lowercased() -> None:
+    row = _row("ad_destination_url", "HTTPS://EXAMPLE.COM/path")
+    result = check_ad_destination_url(
+        row,
+        evidence=_ad_evidence(
+            [{"id": 1, "link_url": "https://example.com/path"}]
+        ),
+    )
+    assert result.verdict == "Pass"
+
+
+def test_ad_url_utm_difference_is_fix() -> None:
+    """Strict on query params: different UTMs flag as Fix, not a false Pass."""
+    row = _row(
+        "ad_destination_url", "https://example.com/p?utm_source=facebook"
+    )
+    result = check_ad_destination_url(
+        row,
+        evidence=_ad_evidence(
+            [
+                {
+                    "id": 1,
+                    "name": "Ad A",
+                    "link_url": "https://example.com/p?utm_source=google",
+                }
+            ]
+        ),
+    )
+    assert result.verdict == "Fix"
+    assert "Ad A" in result.action
+
+
+def test_ad_url_nested_creative_field_read() -> None:
+    """Falls through to creative.link_url when top-level link_url is absent."""
+    row = _row("ad_destination_url", "https://example.com/page")
+    result = check_ad_destination_url(
+        row,
+        evidence=_ad_evidence(
+            [{"id": 1, "creative": {"link_url": "https://example.com/page"}}]
+        ),
+    )
+    assert result.verdict == "Pass"
+
+
+def test_ad_url_deeply_nested_object_story_spec_path() -> None:
+    """Some BQ schemas put it under creative.object_story_spec.link_data.link."""
+    row = _row("ad_destination_url", "https://example.com/deep")
+    result = check_ad_destination_url(
+        row,
+        evidence=_ad_evidence(
+            [
+                {
+                    "id": 1,
+                    "creative": {
+                        "object_story_spec": {
+                            "link_data": {"link": "https://example.com/deep"}
+                        }
+                    },
+                }
+            ]
+        ),
+    )
+    assert result.verdict == "Pass"
+
+
+def test_ad_url_one_ad_diverges_is_fix() -> None:
+    row = _row("ad_destination_url", "https://example.com/lp")
+    result = check_ad_destination_url(
+        row,
+        evidence=_ad_evidence(
+            [
+                {"id": 1, "link_url": "https://example.com/lp"},
+                {
+                    "id": 2,
+                    "name": "Bad URL Ad",
+                    "link_url": "https://wrongsite.com/lp",
+                },
+            ]
+        ),
+    )
+    assert result.verdict == "Fix"
+    assert "Bad URL Ad" in result.action
+
+
+def test_ad_url_no_ads_is_review() -> None:
+    row = _row("ad_destination_url", "https://example.com")
+    result = check_ad_destination_url(row, evidence=_ad_evidence([]))
+    assert result.verdict == "Review"
+
+
+def test_ad_url_all_missing_url_is_review() -> None:
+    row = _row("ad_destination_url", "https://example.com")
+    result = check_ad_destination_url(
+        row, evidence=_ad_evidence([{"id": 1}, {"id": 2}])
+    )
+    assert result.verdict == "Review"
+
+
+def test_ad_url_unparseable_expected_is_review() -> None:
+    row = _row("ad_destination_url", "::: not a url :::")
+    result = check_ad_destination_url(
+        row,
+        evidence=_ad_evidence([{"id": 1, "link_url": "https://example.com"}]),
+    )
+    assert result.verdict == "Review"
+
+
+def test_ad_url_bare_host_in_builder_input_normalized() -> None:
+    """Builder pastes 'example.com'; we default to https for comparison."""
+    row = _row("ad_destination_url", "example.com")
+    result = check_ad_destination_url(
+        row,
+        evidence=_ad_evidence([{"id": 1, "link_url": "https://example.com"}]),
+    )
+    assert result.verdict == "Pass"
+
+
 # --- registry integration --------------------------------------------------
 
 
@@ -568,6 +812,10 @@ def test_checks_registered() -> None:
     assert "adset_age_max" in CHECK_REGISTRY
     assert "adset_genders" in CHECK_REGISTRY
     assert "adset_countries" in CHECK_REGISTRY
+    # Ad checks
+    assert "ad_status" in CHECK_REGISTRY
+    assert "ad_count" in CHECK_REGISTRY
+    assert "ad_destination_url" in CHECK_REGISTRY
 
 
 def test_run_check_dispatches_to_objective() -> None:

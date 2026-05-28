@@ -12,6 +12,9 @@ from collections.abc import Callable
 from typing import Any
 
 from app.checks.meta_checks import (
+    check_ad_count,
+    check_ad_destination_url,
+    check_ad_status,
     check_adset_age_max,
     check_adset_age_min,
     check_adset_countries,
@@ -47,9 +50,15 @@ CHECK_REGISTRY: dict[str, CheckFunction] = {
     "adset_age_max": check_adset_age_max,
     "adset_genders": check_adset_genders,
     "adset_countries": check_adset_countries,
-    # Ad / text checks land as Kerri's check_ids lock and Riley/Nikki add
-    # columns. Checks for fields not yet in BigQuery return Review until the
-    # column lands. Organization (handoff §7.2): campaign / ad_set / ad / text.
+    # Ad level. Destination URL read defensively across several BQ schemas
+    # (link_url, destination_url, creative.link_url, object_story_spec.link).
+    "ad_status": check_ad_status,
+    "ad_count": check_ad_count,
+    "ad_destination_url": check_ad_destination_url,
+    # Text checks (Gemini): defined in app/checks/text_checks.py, NOT here.
+    # The pipeline skips text-check rows in execute_checks and routes them
+    # through execute_text_checks. Adding a text check is a TEXT_CHECK_DEFINITIONS
+    # entry, not a CHECK_REGISTRY entry.
 }
 
 
