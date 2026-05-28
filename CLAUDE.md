@@ -105,6 +105,12 @@ Lock these three in a shared doc before either repo ships changes. They are the 
 - **Region:** `us-west1`
 - **Service account:** `ppc-qa-buddy@prj-prd-ai-ppc-qa-pkph.iam.gserviceaccount.com`
 - **Firestore collection (current):** `qa_runs` (single collection; Social split TBD — likely stay single, index by `platform`)
+- **Secret Manager secrets** (confirmed present 2026-05-28, Jack's ADC has list + version-access on this project):
+  - `slack-bot-token`, `slack-signing-secret` — prod Slack workspace
+  - `test-slack-bot-token`, `test-slack-signing-secret` — **test** Slack workspace (use these for the test worker + `slack_smoke.py`)
+  - `gemini-api-key`, `google-ads-*`, `qa-mcc-routes-json-{prod,test}` — Search-side, FYI
+  - Pull a value without leaking it into logs: `SLACK_BOT_TOKEN=$(gcloud secrets versions access latest --secret=test-slack-bot-token --project=prj-prd-ai-ppc-qa-pkph) python scripts/slack_smoke.py --channel C…` (inline env var, never echoed).
+- **Test Slack bot:** bot user ID `U0B3EJ7PZ5Z` (Maya, 2026-05-28) — used by the listener to detect the `@qa-buddy` mention; not needed by the worker's outbound post.
 - **Firestore TTL policy** (one-time manual setup; ~24h lag; app already handles expiry at read-time, this is cleanup only):
   - Console: `https://console.cloud.google.com/firestore/databases/-default-/ttl?project=prj-prd-ai-ppc-qa-pkph`
   - Collection group: `qa_runs_pending_confirmations`
@@ -167,7 +173,7 @@ Lock these three in a shared doc before either repo ships changes. They are the 
 - ✗ BigQuery field coverage today → known (~16 of ~37 deterministic; see Data architecture)
 - ✗ Pre-existing BQ wrapper → none existed; built fresh
 - ✗ Check naming → we own it, lowercase_underscore (Brandon OK'd; Kerri may revisit when back)
-- ✗ Slack-vs-Social field naming → `qa_app` ("search"/"social"); listener infers from channel (Maya OK'd, handling greystar/test-channel mapping). **Naming overlap noted (2026-05-28):** Maya's existing envelope already carries a `resolved_platform` field (default `"google_ads"`, used by MCC routing). Whether `qa_app` = extending `resolved_platform`'s values vs. a new dimension is a question to confirm with her before either of us writes envelope code.
+- ✗ Slack-vs-Social field naming → `qa_app`, **defaulted to `search`** (Maya re-confirmed directly 2026-05-28: "we already decided to do the qa_app and its defaulted to search"). It is a **separate field** from her existing `resolved_platform` (default `"google_ads"`, used by MCC routing) — keeping them distinct means Social routing doesn't trip her Google Ads MCC branches. Listener stamps `qa_app="social"` on Social requests; our worker reads that. Settled — safe to write envelope code against it.
 - ✗ Cloud Tasks OIDC auth → implemented (`app/api/task_auth.py`, fail-closed; was deferred)
 - ✗ Data layer validated end-to-end against live BigQuery (2026-05-27) — correct verdicts
 - ✗ Local Sheets auth → user-OAuth Sheets/Drive scopes are blocked on this Google Workspace; live sheets require the service account; local uses the in-memory sheet stand-in
