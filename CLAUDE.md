@@ -141,6 +141,17 @@ Lock these three in a shared doc before either repo ships changes. They are the 
 
 **Pass / Fix / Review / NA / Error.** Review is the safety valve — when in doubt, return Review. Builders have learned what these mean on the Search side. Do not introduce new verdicts.
 
+## Brief targets & scope (Maya's Project Brief, May 2026)
+
+Durable facts from the brief — keep in mind across the project:
+- **Success bar:** bot agrees with a human reviewer on Pass/Fix **100%** on a labeled test set. **Coverage target: 91%** of checklist items deterministic (Pass/Fix/N/A); ~9% surface as Review. Adoption: >50% of Meta QAs within a month of pilot.
+- **Runtime:** <2 min typical, <5 min most, **hard stop at 12 min** (our `QA_WORKER_MAX_RUNTIME_SECONDS` default is 900s/15min → align to 720s). Slack ack <3s, processing start <30s, 99.5% availability.
+- **Every fixed-value field has dropdown validation** (the MASTER DATA VALIDATION tab). Validates the value-map calibration approach: for fixed-value fields, value-match against the dropdown value. Yes/No fields are the *non*-fixed-value ones.
+- **Gemini scope (text only):** spellcheck, capitalization, pricing language, promotional copy in headlines, **fair-housing compliance**. Narrow yes/no, never generative; uncertainty→Review; track Gemini-flagged checks separately to measure error rate before rollout. ~$0.01/job.
+- **Always ≥1 manual check** (the `download_changes` equivalent) → Review with instructions.
+- **Final QA sign-off stays with humans;** bot is first-pass, never sole approver. Gemini outputs are advisory, with reasoning logged.
+- ⚠️ **The brief predates the BigQuery decision.** It says actuals come from "Meta Marketing API or Polaris," and its Architecture section still has Search/Google-Ads leftovers (MCC OAuth2, GAQL queries, campaign-name lookup). The implemented + validated reality is **BigQuery** (Airbyte from the Meta API). Treat the brief's data-source/arch wording as aspirational; BigQuery is canonical.
+
 ## Hard rules (from the original handoff §4)
 
 1. NEVER deploy to production without 99.9% confidence. Test GCP + test Slack workspace first.
