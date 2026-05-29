@@ -37,19 +37,43 @@ class TextCheckDefinition:
     ad_field: str  # Dot-path into the ad record, e.g. "body" or "creative.body".
 
 
-# Empty until Brandon hands over the canonical text-check set. Example shape
-# (kept commented so the registry stays empty for shape-stability tests):
+# The three spelling checks the brief scopes to Gemini (creative copy /
+# headline / description). Field paths come from the QA template's column B.
+# Instructions are deliberately NARROW — spelling only, never grammar /
+# punctuation / capitalization / word-choice / translation (hard rule #3) — and
+# bias to Review on any uncertainty (Peacock-Olympics rule). Brandon can refine
+# the wording; the scope is fixed by the brief.
 #
-# "creative_spelling": TextCheckDefinition(
-#     check_id="creative_spelling",
-#     instruction=(
-#         "Does this ad text contain any spelling errors? Answer Pass if it is "
-#         "perfectly spelled, Fix if there is a clear spelling error, Review if "
-#         "you are not confident."
-#     ),
-#     ad_field="creative.body",
-# ),
-TEXT_CHECK_DEFINITIONS: dict[str, TextCheckDefinition] = {}
+# Capitalization, pricing/promo language, and fair-housing compliance are also
+# in Gemini scope per the brief but map to template rows not yet in the
+# confirmed set — add them here when those check_ids land.
+_SPELLING_INSTRUCTION = (
+    "You are checking ad creative text for SPELLING errors only. Does the "
+    "following {part} contain a clear, unambiguous spelling mistake (a "
+    "misspelled English word)? Respond Fix ONLY if there is a definite spelling "
+    "error. Respond Pass if the spelling is correct. Respond Review if you are "
+    "not fully confident, or if the text relies on brand names, intentional "
+    "stylization, abbreviations, or non-English words you cannot verify. Do NOT "
+    "flag grammar, punctuation, capitalization, or word choice — spelling only."
+)
+
+TEXT_CHECK_DEFINITIONS: dict[str, TextCheckDefinition] = {
+    "ad_copy_spelling": TextCheckDefinition(
+        check_id="ad_copy_spelling",
+        instruction=_SPELLING_INSTRUCTION.format(part="ad copy (body) text"),
+        ad_field="creative.object_story_spec.link_data.message",
+    ),
+    "ad_headline_spelling": TextCheckDefinition(
+        check_id="ad_headline_spelling",
+        instruction=_SPELLING_INSTRUCTION.format(part="ad headline"),
+        ad_field="creative.object_story_spec.link_data.name",
+    ),
+    "ad_description_spelling": TextCheckDefinition(
+        check_id="ad_description_spelling",
+        instruction=_SPELLING_INSTRUCTION.format(part="ad description"),
+        ad_field="creative.object_story_spec.link_data.description",
+    ),
+}
 
 
 def is_text_check(check_id: str) -> bool:

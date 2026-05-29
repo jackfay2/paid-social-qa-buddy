@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from app.checks.meta_checks import (
+    check_ad_call_to_action,
     check_ad_count,
     check_ad_destination_url,
     check_ad_status,
@@ -843,6 +844,81 @@ def test_ad_url_bare_host_in_builder_input_normalized() -> None:
     assert result.verdict == "Pass"
 
 
+# --- ad_call_to_action -----------------------------------------------------
+
+
+def test_cta_dropdown_label_matches_enum_passes() -> None:
+    """Builder picks 'Learn More'; Meta stores LEARN_MORE → Pass."""
+    row = _row("ad_call_to_action", "Learn More")
+    result = check_ad_call_to_action(
+        row, evidence=_ad_evidence([{"id": 1, "call_to_action_type": "LEARN_MORE"}])
+    )
+    assert result.verdict == "Pass"
+
+
+def test_cta_special_send_message_maps_to_message_page() -> None:
+    """'Send Message' (dropdown) maps to Meta's MESSAGE_PAGE enum."""
+    row = _row("ad_call_to_action", "Send Message")
+    result = check_ad_call_to_action(
+        row, evidence=_ad_evidence([{"id": 1, "call_to_action_type": "MESSAGE_PAGE"}])
+    )
+    assert result.verdict == "Pass"
+
+
+def test_cta_nested_creative_path_read() -> None:
+    row = _row("ad_call_to_action", "Shop Now")
+    result = check_ad_call_to_action(
+        row,
+        evidence=_ad_evidence(
+            [
+                {
+                    "id": 1,
+                    "creative": {
+                        "object_story_spec": {
+                            "link_data": {"call_to_action": {"type": "SHOP_NOW"}}
+                        }
+                    },
+                }
+            ]
+        ),
+    )
+    assert result.verdict == "Pass"
+
+
+def test_cta_mismatch_is_fix() -> None:
+    row = _row("ad_call_to_action", "Sign Up")
+    result = check_ad_call_to_action(
+        row,
+        evidence=_ad_evidence(
+            [{"id": 1, "name": "Ad A", "call_to_action_type": "LEARN_MORE"}]
+        ),
+    )
+    assert result.verdict == "Fix"
+    assert "Ad A" in result.action
+
+
+def test_cta_unrecognized_expected_is_review() -> None:
+    row = _row("ad_call_to_action", "Do a backflip")
+    result = check_ad_call_to_action(
+        row, evidence=_ad_evidence([{"id": 1, "call_to_action_type": "LEARN_MORE"}])
+    )
+    assert result.verdict == "Review"
+
+
+def test_cta_all_missing_is_review() -> None:
+    row = _row("ad_call_to_action", "Learn More")
+    result = check_ad_call_to_action(
+        row, evidence=_ad_evidence([{"id": 1}, {"id": 2}])
+    )
+    assert result.verdict == "Review"
+
+
+def test_cta_no_ads_is_review() -> None:
+    row = _row("ad_call_to_action", "Learn More")
+    result = check_ad_call_to_action(row, evidence=_ad_evidence([]))
+    assert result.verdict == "Review"
+
+
 # --- registry integration --------------------------------------------------
 
 
@@ -864,6 +940,7 @@ def test_checks_registered() -> None:
     assert "ad_status" in CHECK_REGISTRY
     assert "ad_count" in CHECK_REGISTRY
     assert "ad_destination_url" in CHECK_REGISTRY
+    assert "ad_call_to_action" in CHECK_REGISTRY
 
 
 def test_run_check_dispatches_to_objective() -> None:

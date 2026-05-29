@@ -101,10 +101,30 @@ def test_ad_label_prefers_name() -> None:
 # --- is_text_check / TEXT_CHECK_DEFINITIONS starts empty --------------------
 
 
-def test_text_check_definitions_starts_empty() -> None:
-    """Until Brandon hands over the spec, the registry must be empty so we
-    don't accidentally route deterministic check_ids to Gemini."""
-    assert text_checks_module.TEXT_CHECK_DEFINITIONS == {}
+def test_text_check_definitions_has_three_spelling_checks() -> None:
+    """The brief scopes three spelling checks to Gemini (copy/headline/
+    description). Each must declare a check_id, an instruction, and the BQ
+    field path it reads."""
+    defs = text_checks_module.TEXT_CHECK_DEFINITIONS
+    assert set(defs) == {
+        "ad_copy_spelling",
+        "ad_headline_spelling",
+        "ad_description_spelling",
+    }
+    for key, spec in defs.items():
+        assert spec.check_id == key
+        assert spec.instruction.strip()
+        assert spec.ad_field.startswith("creative.object_story_spec.link_data.")
+        # Narrow-spelling guard: the instruction must NOT broaden into grammar
+        # etc. (hard rule #3) — it explicitly scopes to spelling only.
+        assert "spelling only" in spec.instruction.lower()
+
+
+def test_text_check_field_paths_match_template() -> None:
+    defs = text_checks_module.TEXT_CHECK_DEFINITIONS
+    assert defs["ad_copy_spelling"].ad_field.endswith(".message")
+    assert defs["ad_headline_spelling"].ad_field.endswith(".name")
+    assert defs["ad_description_spelling"].ad_field.endswith(".description")
 
 
 def test_is_text_check_false_for_unknown_ids() -> None:

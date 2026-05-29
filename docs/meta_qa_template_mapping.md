@@ -147,12 +147,19 @@ green = already confirmed. 10 of the 17 are already built:
 | Name - Aligned with Conventions (ad) | ad_name_conventions | ✋/🔨 |
 | Ad Status | ad_status | ✅ |
 | Instagram Account Selection | ad_instagram_account | 🔨 |
-| Call To Action | ad_call_to_action | 🔨 |
+| Call To Action | ad_call_to_action | ✅ (2026-05-29) |
 
-**Priority build list (confirmed, not yet built): 7** — campaign_budget,
-adset_spend_minimum, adset_spend_maximum, ad_instagram_account, ad_call_to_action,
-+ the two naming-convention rows. Note 4 of the 7 are Yes/No-style → blocked on
-the check-styles decision.
+**Priority build list (confirmed, not yet built): 6** — campaign_budget,
+adset_spend_minimum, adset_spend_maximum, ad_instagram_account, + the two
+naming-convention rows. Note 4 of the 6 are Yes/No-style → blocked on the
+check-styles decision. (`ad_call_to_action` built 2026-05-29, value-matching the
+18 dropdown CTA labels.)
+
+**Gemini spelling checks now defined (2026-05-29):** `ad_copy_spelling`,
+`ad_headline_spelling`, `ad_description_spelling` are live in
+`TEXT_CHECK_DEFINITIONS` (narrow spelling-only instructions, Review on
+uncertainty) and route through the batched text-check path. Brandon can refine
+the instruction wording; scope is fixed by the brief.
 
 ## Canonical builder-input values (MASTER DATA VALIDATION tab)
 

@@ -1126,3 +1126,132 @@ def check_ad_destination_url(row: CheckRow, *, evidence: dict[str, Any] | None =
             )
         return _pass(row, f"({len(missing)} of {len(ads)} ads missing destination URL)")
     return _pass(row)
+
+
+# --- ad_call_to_action -----------------------------------------------------
+#
+# Builders pick a CTA from the MASTER DATA VALIDATION dropdown (18 values);
+# Meta stores creative.call_to_action_type as an enum. Most friendly labels are
+# just the enum upper-snake-cased ("Learn More" -> LEARN_MORE), but a few differ
+# ("Send Message" -> MESSAGE_PAGE, "Send WhatsApp Message" -> WHATSAPP_MESSAGE).
+# The map below is keyed by the exact dropdown labels (normalized) so we match
+# what builders actually select; unknown input -> Review, never a false Fix.
+
+# Meta call_to_action_type enums we recognize as actual values.
+_KNOWN_CTA_TYPES = {
+    "LEARN_MORE", "SHOP_NOW", "SIGN_UP", "CONTACT_US", "DOWNLOAD", "BOOK_NOW",
+    "GET_QUOTE", "GET_OFFER", "CALL_NOW", "MESSAGE_PAGE", "WHATSAPP_MESSAGE",
+    "ORDER_NOW", "SUBSCRIBE", "APPLY_NOW", "WATCH_MORE", "USE_APP",
+    "BUY_TICKETS", "GET_DIRECTIONS",
+}
+
+# Dropdown label (normalized: lowercase, underscores->spaces) -> Meta enum.
+_CTA_SYNONYMS = {
+    "learn more": "LEARN_MORE",
+    "shop now": "SHOP_NOW",
+    "sign up": "SIGN_UP",
+    "contact us": "CONTACT_US",
+    "download": "DOWNLOAD",
+    "book now": "BOOK_NOW",
+    "get quote": "GET_QUOTE",
+    "get offer": "GET_OFFER",
+    "call now": "CALL_NOW",
+    "send message": "MESSAGE_PAGE",
+    "send whatsapp message": "WHATSAPP_MESSAGE",
+    "order now": "ORDER_NOW",
+    "subscribe": "SUBSCRIBE",
+    "apply now": "APPLY_NOW",
+    "watch more": "WATCH_MORE",
+    "use app": "USE_APP",
+    "buy tickets": "BUY_TICKETS",
+    "get directions": "GET_DIRECTIONS",
+}
+
+# CTA can sit at a few places on the ad/creative record depending on client schema.
+_AD_CTA_FIELDS = (
+    "call_to_action_type",
+    "creative.call_to_action_type",
+    "creative.object_story_spec.link_data.call_to_action.type",
+    "object_story_spec.link_data.call_to_action.type",
+)
+
+
+def _canonical_cta(value: Any) -> str:
+    """Map a builder label or stored value to a Meta CTA enum, or '' if unknown.
+
+    Meta enums (MESSAGE_PAGE, etc.) treated as equivalent to their dropdown
+    label so an actual value matches the builder's selection. Note: "send
+    message" maps to MESSAGE_PAGE, but a stored SEND_MESSAGE is also accepted.
+    """
+    norm = _norm(value)
+    if not norm:
+        return ""
+    # Synonym map first so dropdown labels with non-obvious enums resolve
+    # correctly ("send message" -> MESSAGE_PAGE) before the upper-snake-case
+    # fallback. A stored enum like "SEND_MESSAGE" also normalizes to
+    # "send message" and routes through the synonym → same canonical value.
+    if norm in _CTA_SYNONYMS:
+        return _CTA_SYNONYMS[norm]
+    upper = norm.upper().replace(" ", "_")
+    if upper in _KNOWN_CTA_TYPES:
+        return upper
+    return ""
+
+
+def _read_ad_cta(ad: dict[str, Any]) -> str:
+    for path in _AD_CTA_FIELDS:
+        value = _read_path(ad, path)
+        if value:
+            return value
+    return ""
+
+
+def check_ad_call_to_action(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
+    ads = _ads(evidence)
+    if not ads:
+        return _review(row, "No ads found in BigQuery for this campaign.")
+
+    expected = _canonical_cta(row.builder_input)
+    if not expected:
+        return _review(
+            row,
+            f'Could not interpret the expected call to action "{row.builder_input}". '
+            "Use a value from the CTA dropdown (e.g. Learn More, Shop Now).",
+        )
+
+    mismatched: list[tuple[str, str]] = []
+    unparseable: list[tuple[str, str]] = []
+    missing: list[str] = []
+
+    for ad in ads:
+        raw = _read_ad_cta(ad)
+        if not raw:
+            missing.append(_ad_label(ad))
+            continue
+        actual = _canonical_cta(raw)
+        if not actual:
+            unparseable.append((_ad_label(ad), str(raw)))
+            continue
+        if actual != expected:
+            mismatched.append((_ad_label(ad), str(raw)))
+
+    if mismatched:
+        first_label, first_actual = mismatched[0]
+        more = f" (+{len(mismatched) - 1} more)" if len(mismatched) > 1 else ""
+        return _fix(
+            row,
+            f'Expected "{row.builder_input}", but {first_label} uses "{first_actual}"{more}',
+        )
+    if unparseable:
+        label, raw = unparseable[0]
+        return _review(
+            row, f'Ad CTA "{raw}" on {label} not recognized. Verify manually.'
+        )
+    if missing:
+        if len(missing) == len(ads):
+            return _review(
+                row,
+                "Call to action not available in BigQuery for any ad; verify manually.",
+            )
+        return _pass(row, f"({len(missing)} of {len(ads)} ads missing a CTA)")
+    return _pass(row)

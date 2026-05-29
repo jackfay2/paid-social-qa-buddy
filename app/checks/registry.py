@@ -12,6 +12,7 @@ from collections.abc import Callable
 from typing import Any
 
 from app.checks.meta_checks import (
+    check_ad_call_to_action,
     check_ad_count,
     check_ad_destination_url,
     check_ad_status,
@@ -55,6 +56,7 @@ CHECK_REGISTRY: dict[str, CheckFunction] = {
     "ad_status": check_ad_status,
     "ad_count": check_ad_count,
     "ad_destination_url": check_ad_destination_url,
+    "ad_call_to_action": check_ad_call_to_action,
     # Text checks (Gemini): defined in app/checks/text_checks.py, NOT here.
     # The pipeline skips text-check rows in execute_checks and routes them
     # through execute_text_checks. Adding a text check is a TEXT_CHECK_DEFINITIONS
