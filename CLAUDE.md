@@ -240,16 +240,18 @@ Durable facts from the brief — keep in mind across the project:
 
 ## Next actions (when resuming work)
 
-Cross-team (have lead time — fire these first):
-1. **Maya** — listener change (spec drafted): for `qa_app=social`, skip the 10-digit account_id validation (Meta IDs are ~17 digits), skip MCC routing, route to the `qa-buddy-runs-social` queue + social worker URL. Get her timing.
-2. **Brandon/Kerri** — canonical objective values (real data is legacy: CONVERSIONS / LEAD_GENERATION / PAGE_LIKES, plus ODAX `OUTCOME_*`) + whether legacy maps to new; and the MVP must-have check subset.
-3. **GCP provisioning owner** — who creates the `qa-buddy-runs-social` queue, deploys `qa-buddy-worker-social{,-test}`, and grants the SA `roles/bigquery.dataViewer` on `polaris-data-317717` + Cloud Tasks invoke.
+**End state as of 2026-05-29 (big day):** the **test worker is deployed and proven E2E on live infra** — a hand-enqueued Cloud Task ran queue → OIDC → Cloud Run worker → live BigQuery → 19 checks → verdicts written to a real sheet + summary posted to `#social-qa-buddy-testing` (`Pass 5 | Fix 5 | Review 2`). GCP test path provisioned (queue, SA IAM incl. `bigquery.jobUser`, Cloud Run, OIDC, BigQuery API enabled). Listener copy started: vendored + social-routing core (`RoutingQAQueue` + `qa_app` envelope) built & tested. 345 worker tests + 6 listener tests green.
 
-Solo build (after the above inputs land):
-4. Wire Gemini into orchestration (text-check batch from ad evidence + merge); validate against an active ad with real creative.
-5. Service-account Sheets auth → validate live sheet read/write (currently in-memory).
-6. Expand the check registry (calibrate value-maps with Brandon).
-7. Deploy to test, then the full test-channel flow.
+**The ONLY blocker to a true `@-mention` is the listener leg.** Everything downstream is proven on real infra.
+
+Next (in order):
+1. **Finish the listener copy** (ours, mostly unblocked) — see `listener/README.md`: (a) wire `qa_app` from intake → the `CloudTasksRequest` envelope (parse in `slack_parser` or infer from channel), (b) a focused FastAPI server entrypoint wiring both queues via `RoutingQAQueue`, (c) deploy as `qa-buddy-listener-social-test`.
+2. **Test Slack app** (needs Maya/Slack admin) — a separate test Slack app whose Events URL → our test listener (one app = one Events URL, so we can't reuse `@QA Buddy Bot Test`). THE one external dependency for the `@-mention` flow.
+3. **Brandon** — the Yes/No-vs-value-match decision (blocks ~4 confirmed checks: spend min/max, naming, audiences, exclusions) + bless the `check_id` list (`docs/meta_qa_template_mapping.md`).
+4. **Expand checks** as Brandon answers + as the template `Check_ID` column is finalized.
+5. **Prod promotion** — `deploy/build_and_deploy_worker.sh prod` (re-tag tested digest, 2-step traffic) once the test flow is validated end-to-end.
+
+Deployed test worker URL: `https://qa-buddy-worker-social-test-637315940254.us-west1.run.app`. Manual re-run recipe: see the "Deployed test worker" section above.
 
 ## Repo housekeeping
 
