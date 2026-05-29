@@ -94,6 +94,19 @@ Built and unit-tested (339 tests; CI runs them on push). The data layer + full o
 
 **Partial-E2E milestone (2026-05-28):** `scripts/slack_smoke.py` runs the real orchestration (live BQ → real checks → real verdicts) and posts the summary to a real channel in the test Slack workspace. Dry-run confirmed the BQ + checks + message legs work end-to-end (discovered campaign `6276091730756`, client `C61854560`, `CONVERSIONS` objective → 2 Pass). The only unproven leg is the live `chat.postMessage`, which needs: (a) the test-workspace bot token in `SLACK_BOT_TOKEN`, (b) a channel ID with the bot invited, (c) the bot having `chat:write` scope. This is NOT the full Slack-triggered flow — the @-mention listener + Cloud Tasks queue legs remain blocked on GCP provisioning + Maya's listener change.
 
+## Deployed test worker (2026-05-29)
+
+The Social **test** path is live on Cloud Run — first real deploy:
+- **Service:** `qa-buddy-worker-social-test` (us-west1), private (`--no-allow-unauthenticated`), runs as `ppc-qa-buddy@`. URL `https://qa-buddy-worker-social-test-637315940254.us-west1.run.app`.
+- **Image:** `us-west1-docker.pkg.dev/.../cloud-run-source-deploy/qa-buddy-worker-social:test-20260529-145027` (Cloud Build, our repo's Dockerfile).
+- **Queue:** `qa-buddy-runs-social-test` (mirrors `qa-buddy-runs`).
+- **IAM (SA):** `bigquery.jobUser` + `bigquery.dataViewer`@polaris-data-317717 + `datastore.user` + `secretmanager.secretAccessor` + `cloudtasks.enqueuer` + `run.invoker`@the service.
+- **Config:** secrets via Cloud Run `--set-secrets` (`SLACK_BOT_TOKEN`←`test-slack-bot-token`, `GEMINI_API_KEY`←`gemini-api-key`); `QA_SHEETS_AUTH_MODE=adc`; `QA_CLOUD_TASKS_AUTH_REQUIRED=true`; OIDC audience = service URL. `/readyz` → 200, no secret errors.
+- **Health check:** `TOKEN=$(gcloud auth print-identity-token --impersonate-service-account=ppc-qa-buddy@... --audiences=<URL>); curl -H "Authorization: Bearer $TOKEN" <URL>/readyz`.
+- All `-social`-named + isolated; Maya's services untouched. Full deploy steps + scripts in `deploy/`.
+- **Remaining for the full backend E2E (step 4):** a writable test sheet shared with the SA + a hand-enqueued Cloud Task. **For the true `@-mention`:** Maya's listener routing (Gate 3).
+- ⚠️ **Unverified on Cloud Run:** Sheets write via ADC-as-attached-SA — `google.auth.default(scopes=[spreadsheets,drive])` on the metadata server may not honor non-cloud-platform scopes. The hand-enqueued E2E will confirm; if it fails, may need domain-wide delegation or a different sheets-auth path on Cloud Run.
+
 ## Coordination contract with Maya
 
 Lock these three in a shared doc before either repo ships changes. They are the entire surface area between her code and ours:

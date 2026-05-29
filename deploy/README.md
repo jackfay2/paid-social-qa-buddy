@@ -54,6 +54,15 @@ can't.
 Run `./grant_iam.sh` (with `CONFIRM=1`) to apply the SA deltas, or hand this
 table to the provisioner.
 
+## Provisioning progress (test path)
+
+- ✅ **Gate 1** — Jack has Cloud Tasks create + project IAM-admin (queue created, SA role granted successfully).
+- ✅ **Step 1** — `qa-buddy-runs-social-test` queue created (2026-05-29).
+- ✅ **Step 2** — SA granted `bigquery.jobUser` (2026-05-29); has `dataViewer`@polaris-data-317717 too.
+- ✅ **Step 3** — `qa-buddy-worker-social-test` DEPLOYED + healthy (2026-05-29). Image `qa-buddy-worker-social:test-20260529-145027` (Cloud Build SUCCESS). URL `https://qa-buddy-worker-social-test-637315940254.us-west1.run.app`. SA granted `run.invoker`; OIDC audience set; `QA_CLOUD_TASKS_AUTH_REQUIRED=true`. `/readyz` → 200 `ready`, `secrets.errors: []`. Private service (`--no-allow-unauthenticated`); reachable via SA-impersonated identity token.
+- 🔄 **Step 4** — hand-enqueue a Cloud Task → full backend E2E (queue → OIDC → worker → live BQ → sheet + Slack). **Needs a writable test sheet shared with the SA** (the one remaining input).
+- ⬜ **Gate 3** — Maya's listener routing → true `@-mention`.
+
 ## Order of operations
 
 1. **Confirm deploy access** (roles above). `gcloud auth login`; `gcloud config set project prj-prd-ai-ppc-qa-pkph`.
