@@ -38,7 +38,7 @@ Grounded against live IAM on 2026-05-29. The SA `ppc-qa-buddy@` currently has
 | Role | Resource | Status | Why |
 |---|---|---|---|
 | `roles/bigquery.dataViewer` | `polaris-data-317717` | ✅ already granted | read Meta data |
-| `roles/bigquery.jobUser` | `prj-prd-ai-ppc-qa-pkph` | ❌ **NEEDED** | run BQ query jobs (dataViewer alone can't) |
+| `roles/bigquery.jobUser` | `prj-prd-ai-ppc-qa-pkph` | ✅ granted 2026-05-29 | run BQ query jobs (dataViewer alone can't) |
 | `roles/run.invoker` | `qa-buddy-worker-social[-test]` | ❌ needed at create | queue's OIDC token invokes the worker |
 | `roles/cloudtasks.enqueuer` | project | ✅ already granted | listener enqueues to the social queue |
 | `roles/datastore.user` | project | ✅ already granted | Firestore run store |
