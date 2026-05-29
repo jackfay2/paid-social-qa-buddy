@@ -146,6 +146,20 @@ def test_buying_type_unrecognized_expected_is_review() -> None:
     assert result.verdict == "Review"
 
 
+def test_buying_type_dropdown_reservation_maps_to_reserved() -> None:
+    """MASTER DATA VALIDATION dropdown offers 'Reservation'; Meta enum is RESERVED.
+    Calibration bug fix: this must Pass, not false-Review."""
+    row = _row("campaign_buying_type", "Reservation")
+    result = check_campaign_buying_type(row, evidence=_evidence({"buying_type": "RESERVED"}))
+    assert result.verdict == "Pass"
+
+
+def test_buying_type_reservation_vs_auction_is_fix() -> None:
+    row = _row("campaign_buying_type", "Reservation")
+    result = check_campaign_buying_type(row, evidence=_evidence({"buying_type": "AUCTION"}))
+    assert result.verdict == "Fix"
+
+
 # --- campaign_status -------------------------------------------------------
 
 
@@ -237,6 +251,40 @@ def test_bid_strategy_exact_enum_match_passes() -> None:
     row = _row("campaign_bid_strategy", "COST_CAP")
     result = check_campaign_bid_strategy(
         row, evidence=_evidence({"bid_strategy": "COST_CAP"})
+    )
+    assert result.verdict == "Pass"
+
+
+def test_bid_strategy_dropdown_highest_volume_or_value_passes() -> None:
+    """MASTER DATA VALIDATION dropdown label 'Highest volume or value' maps to
+    LOWEST_COST_WITHOUT_CAP. Calibration bug fix: was false-Review before."""
+    row = _row("campaign_bid_strategy", "Highest volume or value")
+    result = check_campaign_bid_strategy(
+        row, evidence=_evidence({"bid_strategy": "LOWEST_COST_WITHOUT_CAP"})
+    )
+    assert result.verdict == "Pass"
+
+
+def test_bid_strategy_dropdown_cost_per_result_goal_passes() -> None:
+    row = _row("campaign_bid_strategy", "Cost per result goal")
+    result = check_campaign_bid_strategy(
+        row, evidence=_evidence({"bid_strategy": "COST_CAP"})
+    )
+    assert result.verdict == "Pass"
+
+
+def test_bid_strategy_dropdown_roas_goal_passes() -> None:
+    row = _row("campaign_bid_strategy", "ROAS goal")
+    result = check_campaign_bid_strategy(
+        row, evidence=_evidence({"bid_strategy": "LOWEST_COST_WITH_MIN_ROAS"})
+    )
+    assert result.verdict == "Pass"
+
+
+def test_bid_strategy_dropdown_bid_cap_passes() -> None:
+    row = _row("campaign_bid_strategy", "Bid cap")
+    result = check_campaign_bid_strategy(
+        row, evidence=_evidence({"bid_strategy": "LOWEST_COST_WITH_BID_CAP"})
     )
     assert result.verdict == "Pass"
 

@@ -193,9 +193,26 @@ def check_campaign_objective(row: CheckRow, *, evidence: dict[str, Any] | None =
 
 _KNOWN_BUYING_TYPES = {"AUCTION", "RESERVED", "FIXED_CPM"}
 
+# Builder-facing labels (from the QA template's MASTER DATA VALIDATION dropdown)
+# mapped to the Meta enum stored in BigQuery. The template offers "Reservation",
+# but Meta's buying_type enum value is RESERVED — without this the check would
+# return a false Review on a valid, dropdown-selected input.
+_BUYING_TYPE_SYNONYMS = {
+    "auction": "AUCTION",
+    "reservation": "RESERVED",
+    "reserved": "RESERVED",
+    "fixed cpm": "FIXED_CPM",
+}
+
 
 def _canonical_buying_type(value: Any) -> str:
-    return _norm(value).upper().replace(" ", "_")
+    norm = _norm(value)
+    if not norm:
+        return ""
+    upper = norm.upper().replace(" ", "_")
+    if upper in _KNOWN_BUYING_TYPES:
+        return upper
+    return _BUYING_TYPE_SYNONYMS.get(norm, "")
 
 
 def check_campaign_buying_type(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
@@ -361,22 +378,25 @@ _KNOWN_BID_STRATEGIES = {
     "TARGET_COST",
 }
 
-# Meta UI labels and common shorthands mapped to the enum values. A reasonable
-# first pass that leans toward Review on unknown inputs; validate with Brandon
-# against real QA sheets before trusting Fix verdicts at scale.
+# Meta UI labels and common shorthands mapped to the enum values. The four
+# entries marked (DROPDOWN) are the exact builder-facing labels from the QA
+# template's MASTER DATA VALIDATION tab — the values a builder can actually
+# select. The rest are common shorthands. Leans toward Review on unknown input.
 _BID_STRATEGY_SYNONYMS = {
+    "highest volume or value": "LOWEST_COST_WITHOUT_CAP",  # (DROPDOWN)
+    "cost per result goal": "COST_CAP",                    # (DROPDOWN)
+    "roas goal": "LOWEST_COST_WITH_MIN_ROAS",              # (DROPDOWN)
+    "bid cap": "LOWEST_COST_WITH_BID_CAP",                 # (DROPDOWN)
     "lowest cost": "LOWEST_COST_WITHOUT_CAP",
     "lowest cost without cap": "LOWEST_COST_WITHOUT_CAP",
     "highest volume": "LOWEST_COST_WITHOUT_CAP",
+    "highest value": "LOWEST_COST_WITHOUT_CAP",
     "auto bid": "LOWEST_COST_WITHOUT_CAP",
     "auto": "LOWEST_COST_WITHOUT_CAP",
     "automatic": "LOWEST_COST_WITHOUT_CAP",
-    "bid cap": "LOWEST_COST_WITH_BID_CAP",
     "lowest cost with bid cap": "LOWEST_COST_WITH_BID_CAP",
     "cost cap": "COST_CAP",
-    "cost per result goal": "COST_CAP",
     "cost per result": "COST_CAP",
-    "roas goal": "LOWEST_COST_WITH_MIN_ROAS",
     "min roas": "LOWEST_COST_WITH_MIN_ROAS",
     "minimum roas": "LOWEST_COST_WITH_MIN_ROAS",
     "lowest cost with min roas": "LOWEST_COST_WITH_MIN_ROAS",

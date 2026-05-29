@@ -121,3 +121,67 @@ useful extras, or trim to match the template — Brandon/Kerri's call.
 4. **Pixel/tracking** tracked at ad level, ad-set level, or both? (`adset_conversion_location` vs `ad_tracking_pixel` overlap.)
 5. **Budget** units + builder input format.
 6. Confirm the **swapped age annotation** in column B is a template typo, not intended.
+
+---
+
+## Confirmed (green-highlighted) rows — the MVP check set
+
+Column B is green-filled on 17 rows (detected by reading cell colors). Per Jack,
+green = already confirmed. 10 of the 17 are already built:
+
+| Confirmed row | check_id | Built? |
+|---|---|---|
+| Campaign Objective | campaign_objective | ✅ |
+| Buying Type | campaign_buying_type | ✅ |
+| Budget | campaign_budget | 🔨 |
+| Bid Strategy | campaign_bid_strategy | ✅ |
+| Name - Aligned with Conventions (ad set) | adset_name_conventions | ✋/🔨 |
+| Start Date | adset_start_date | ✅ |
+| End Date | adset_end_date | ✅ |
+| Spend Minimum | adset_spend_minimum | 🔨 (Yes/No) |
+| Spend Maximum | adset_spend_maximum | 🔨 (Yes/No) |
+| Age Min | adset_age_min | ✅ |
+| Age Max | adset_age_max | ✅ |
+| Gender | adset_genders | ✅ |
+| Location | adset_countries | ✅ |
+| Name - Aligned with Conventions (ad) | ad_name_conventions | ✋/🔨 |
+| Ad Status | ad_status | ✅ |
+| Instagram Account Selection | ad_instagram_account | 🔨 |
+| Call To Action | ad_call_to_action | 🔨 |
+
+**Priority build list (confirmed, not yet built): 7** — campaign_budget,
+adset_spend_minimum, adset_spend_maximum, ad_instagram_account, ad_call_to_action,
++ the two naming-convention rows. Note 4 of the 7 are Yes/No-style → blocked on
+the check-styles decision.
+
+## Canonical builder-input values (MASTER DATA VALIDATION tab)
+
+The template's second tab is the dropdown source of truth for Builder Input.
+Snapshotted to `data/meta_master_data_validation_export.csv`. These drive the
+check value-maps:
+
+- **Campaign Objective**: Sales, Awareness, Traffic, Engagement, Leads, App Promotion
+- **Budget Strategy**: Campaign budget, Ad set budget (CBO vs ABO — future `campaign_budget_strategy` check)
+- **Bid Strategy**: Highest volume or value, Cost per result goal, ROAS goal, Bid cap
+- **Buying Type**: Auction, Reservation
+- **Age Min / Max**: 18–65
+- **Gender**: Men, Women, All
+- **Attribution Spec**: 1-day click; 7-day click; 1-day click, 1-day view; 7-day click, 1-day view
+- **Call To Action**: Learn More, Shop Now, Sign Up, Contact Us, Download, Book Now, Get Quote, Get Offer, Call Now, Send Message, Send WhatsApp Message, Order Now, Subscribe, Apply Now, Watch More, Use App, Buy Tickets, Get Directions
+
+**Calibrated against these (2026-05-29):** `campaign_buying_type` now maps
+"Reservation" → `RESERVED`; `campaign_bid_strategy` now maps "Highest volume or
+value" → `LOWEST_COST_WITHOUT_CAP` and confirms "Cost per result goal" → `COST_CAP`.
+Both were false-Review bugs against the exact dropdown labels before.
+
+## Template handling model (mirrors Maya's Search bot)
+
+- The Meta sheet is the **source-of-truth template** (analog of Maya's
+  "Finalized Campaign Template" / `data/new_search_export.csv`). Snapshotted to
+  `data/meta_qa_template_export.csv`. **We never write into it.**
+- `Check_ID` (col A) is **pre-populated as part of finalizing the template** —
+  not written at runtime. It's blank today because the template isn't finalized.
+- Runtime: a builder copies the template, fills Builder Input, shares the COPY
+  with the SA; the bot reads it and writes **only verdicts** (Pass or Fix /
+  Action / QA initial) back into that copy. The master template is read-only.
+- Our testing uses offline fixtures / our own copies — never the master template.
