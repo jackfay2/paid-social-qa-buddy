@@ -12,8 +12,10 @@ PROJECT="${PROJECT:-prj-prd-ai-ppc-qa-pkph}"
 LOCATION="${LOCATION:-us-west1}"
 QUEUES=("qa-buddy-runs-social-test" "qa-buddy-runs-social")
 
-# Mirrors qa-buddy-runs (Search) exactly.
-RATE=(--max-dispatches-per-second=10 --max-concurrent-dispatches=20 --max-burst-size=10)
+# Mirrors qa-buddy-runs (Search) exactly. Note: maxBurstSize is NOT a
+# `queues create` flag — Cloud Tasks derives it from the dispatch rate
+# (verified: rate=10 -> burst=10, matching qa-buddy-runs).
+RATE=(--max-dispatches-per-second=10 --max-concurrent-dispatches=20)
 RETRY=(--max-attempts=5 --min-backoff=5s --max-backoff=300s --max-doublings=16 --max-retry-duration=3600s)
 
 echo "Plan: create Cloud Tasks queues in ${PROJECT}/${LOCATION}:"

@@ -17,7 +17,7 @@ state on 2026-05-29 (read-only inspection).
 | Project / region | `prj-prd-ai-ppc-qa-pkph` / `us-west1` |
 | Worker service account | `ppc-qa-buddy@prj-prd-ai-ppc-qa-pkph.iam.gserviceaccount.com` |
 | Search services (mirror these) | `qa-buddy-worker`, `qa-buddy-worker-test`, `qa-buddy-listener(-test)` |
-| Existing queue | `qa-buddy-runs` (Search) — **`qa-buddy-runs-social` does NOT exist yet** |
+| Existing queue | `qa-buddy-runs` (Search). **`qa-buddy-runs-social-test` CREATED 2026-05-29** (RUNNING, mirrors qa-buddy-runs config); prod `qa-buddy-runs-social` not yet created. |
 | Artifact Registry | `us-west1-docker.pkg.dev/prj-prd-ai-ppc-qa-pkph/cloud-run-source-deploy` (DOCKER) |
 | Secrets (Secret Manager) | `slack-bot-token`, `slack-signing-secret`, `test-slack-bot-token`, `test-slack-signing-secret`, `gemini-api-key` |
 
