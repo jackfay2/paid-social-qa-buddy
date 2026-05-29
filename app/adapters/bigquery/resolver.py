@@ -52,7 +52,15 @@ class AmbiguousAccountError(AccountResolutionError):
 
 @dataclass(frozen=True)
 class ResolverConfig:
+    # `project` namespaces the fully-qualified table names (the data warehouse
+    # that HOLDS the data). `billing_project` is where BQ query JOBS run/bill —
+    # it must be a project where our SA has bigquery.jobUser. They differ in
+    # prod: jobs bill to our app project, data is read from the warehouse. When
+    # billing_project is blank, jobs run in `project` (works locally where the
+    # caller's ADC has jobUser there; fails on Cloud Run where the SA only has
+    # dataViewer on the warehouse).
     project: str = "polaris-data-317717"
+    billing_project: str = ""
     summary_dataset: str = "summary"
 
 
@@ -65,7 +73,9 @@ class BigQueryAccountResolver:
         client: bigquery.Client | None = None,
     ) -> None:
         self.config = config or ResolverConfig()
-        self._client = client or bigquery.Client(project=self.config.project)
+        self._client = client or bigquery.Client(
+            project=self.config.billing_project or self.config.project
+        )
 
     def resolve_client_id(self, account_id: str) -> str | None:
         if not _ACCOUNT_ID_PATTERN.match(account_id or ""):

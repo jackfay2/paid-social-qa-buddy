@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -12,6 +12,40 @@ from app.adapters.bigquery.resolver import (
     InvalidAccountIdError,
     ResolverConfig,
 )
+
+
+# --- billing_project vs data project (the Cloud Run jobUser fix) ------------
+
+
+def test_billing_project_used_for_bq_client_when_set() -> None:
+    """Jobs must run in billing_project (where the SA has jobUser), not the
+    data-warehouse project (where it only has dataViewer)."""
+    with patch("app.adapters.bigquery.resolver.bigquery.Client") as MockClient:
+        BigQueryAccountResolver(
+            config=ResolverConfig(project="data-proj", billing_project="bill-proj")
+        )
+        MockClient.assert_called_once_with(project="bill-proj")
+
+
+def test_bq_client_falls_back_to_data_project_when_billing_blank() -> None:
+    with patch("app.adapters.bigquery.resolver.bigquery.Client") as MockClient:
+        BigQueryAccountResolver(config=ResolverConfig(project="data-proj"))
+        MockClient.assert_called_once_with(project="data-proj")
+
+
+def test_table_namespace_uses_data_project_not_billing() -> None:
+    """Even with a separate billing project, the query must reference the data
+    warehouse's table (config.project), never the billing project."""
+    mock_bq = MagicMock()
+    mock_bq.query.return_value.result.return_value = [{"client_id": "C1"}]
+    resolver = BigQueryAccountResolver(
+        config=ResolverConfig(project="data-proj", billing_project="bill-proj"),
+        client=mock_bq,
+    )
+    resolver.resolve_client_id("123456789")
+    query = mock_bq.query.call_args[0][0]
+    assert "data-proj.summary" in query
+    assert "bill-proj" not in query
 
 
 def _make_resolver(rows: list[dict]) -> BigQueryAccountResolver:

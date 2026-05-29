@@ -5,7 +5,7 @@ Uses a mocked bigquery.Client so the tests don't hit live BQ.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -15,6 +15,35 @@ from app.adapters.bigquery.client import (
     InvalidCampaignIdError,
     InvalidClientIdError,
 )
+
+
+def test_billing_project_used_for_bq_client_when_set() -> None:
+    """Jobs bill to billing_project (SA has jobUser there), not the warehouse."""
+    with patch("app.adapters.bigquery.client.bigquery.Client") as MockClient:
+        BigQueryMetaClient(
+            config=BigQueryMetaConfig(project="data-proj", billing_project="bill-proj")
+        )
+        MockClient.assert_called_once_with(project="bill-proj")
+
+
+def test_bq_client_falls_back_to_data_project_when_billing_blank() -> None:
+    with patch("app.adapters.bigquery.client.bigquery.Client") as MockClient:
+        BigQueryMetaClient(config=BigQueryMetaConfig(project="data-proj"))
+        MockClient.assert_called_once_with(project="data-proj")
+
+
+def test_table_namespace_uses_data_project_not_billing() -> None:
+    """Fully-qualified table refs use the data project, never the billing one."""
+    mock_bq = MagicMock()
+    mock_bq.query.return_value.result.return_value = [{"campaign_id": "1"}]
+    client = BigQueryMetaClient(
+        config=BigQueryMetaConfig(project="data-proj", billing_project="bill-proj"),
+        client=mock_bq,
+    )
+    client.get_campaign("C61854560", "6065738140956")
+    query = mock_bq.query.call_args[0][0]
+    assert "data-proj.C61854560" in query
+    assert "bill-proj" not in query
 
 
 def _make_client(mock_bq: MagicMock) -> BigQueryMetaClient:

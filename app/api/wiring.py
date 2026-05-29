@@ -56,10 +56,16 @@ def build_orchestration_service(settings: Settings) -> SocialQAOrchestrationServ
     return SocialQAOrchestrationService(
         run_store=build_run_store(settings),
         resolver=BigQueryAccountResolver(
-            config=ResolverConfig(project=settings.bq_meta_project)
+            config=ResolverConfig(
+                project=settings.bq_meta_project,
+                billing_project=settings.gcp_project_id,
+            )
         ),
         meta_client=BigQueryMetaClient(
-            config=BigQueryMetaConfig(project=settings.bq_meta_project)
+            config=BigQueryMetaConfig(
+                project=settings.bq_meta_project,
+                billing_project=settings.gcp_project_id,
+            )
         ),
         sheet_client=GoogleSheetsClient(
             config=GoogleSheetsConfig(

@@ -59,10 +59,17 @@ class InvalidCampaignIdError(BigQueryMetaClientError):
 class BigQueryMetaConfig:
     """BigQuery connection settings.
 
-    project: GCP project holding the per-client datasets. Defaults to the
-        Wpromote data warehouse project. Override in tests or for fixtures.
+    project: GCP project HOLDING the per-client datasets (the data warehouse) —
+        used to build fully-qualified table names. Defaults to the Wpromote
+        data warehouse project.
+    billing_project: GCP project where BQ query JOBS run and bill. Must be a
+        project where the caller has bigquery.jobUser. In prod this is our app
+        project (the SA has jobUser there + dataViewer on `project`). Blank →
+        jobs run in `project` (works locally with a privileged ADC; fails on
+        Cloud Run where the SA only has dataViewer on the warehouse).
     """
     project: str = "polaris-data-317717"
+    billing_project: str = ""
 
 
 class BigQueryMetaClient:
@@ -82,8 +89,12 @@ class BigQueryMetaClient:
         client: bigquery.Client | None = None,
     ) -> None:
         self.config = config or BigQueryMetaConfig()
-        # Inject a client in tests; default uses ADC for real BQ.
-        self._client = client or bigquery.Client(project=self.config.project)
+        # Inject a client in tests; default uses ADC for real BQ. Jobs bill to
+        # billing_project (where the SA has jobUser); tables resolve against
+        # `project` (the data warehouse, read via dataViewer).
+        self._client = client or bigquery.Client(
+            project=self.config.billing_project or self.config.project
+        )
         self._cache: dict[tuple[str, str, str], Any] = {}
 
     def get_campaign(self, client_id: str, campaign_id: str) -> dict[str, Any]:
