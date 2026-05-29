@@ -67,8 +67,8 @@ class Settings(BaseSettings):
     qa_gemini_confidence_threshold: float = 0.8
     qa_gemini_timeout_seconds: int = 15
 
-    # Worker runtime
-    qa_worker_max_runtime_seconds: int = 900
+    # Worker runtime — brief specifies a 12-minute hard stop (720s).
+    qa_worker_max_runtime_seconds: int = 720
 
     # Sheets (gspread)
     qa_sheets_auth_mode: str = "adc"  # "adc" | "service_account" | "auto"

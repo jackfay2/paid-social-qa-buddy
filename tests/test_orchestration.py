@@ -89,6 +89,29 @@ def test_happy_path_completes() -> None:
     assert "QA complete" in result.message
 
 
+def test_summary_message_includes_fix_specifics_and_sheet_link() -> None:
+    """Brief: the Slack summary surfaces fix items with specifics + a sheet link."""
+
+    def fixing_runner(row, *, evidence=None):
+        return CheckResult(row.row_index, row.check_id, "Fix", "Expected X, got Y")
+
+    rows = [CheckRow(row_index=5, check_id="campaign_objective", builder_input="Sales")]
+    service, *_ = _make_service(check_runner=fixing_runner, rows=rows)
+    result = service.run(_request(sheet_url="https://docs.google.com/spreadsheets/d/abc/edit"))
+
+    assert "QA complete" in result.message
+    assert "Fixes" in result.message
+    assert "campaign_objective: Expected X, got Y" in result.message
+    assert "Sheet: https://docs.google.com/spreadsheets/d/abc/edit" in result.message
+
+
+def test_summary_message_no_fixes_section_when_all_pass() -> None:
+    service, *_ = _make_service()  # default runner passes
+    result = service.run(_request())
+    assert "QA complete" in result.message
+    assert "Fixes" not in result.message
+
+
 def test_happy_path_writes_results_once() -> None:
     service, _store, _resolver, _meta, sheet = _make_service()
     service.run(_request())

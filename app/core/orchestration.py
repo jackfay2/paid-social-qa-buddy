@@ -247,7 +247,9 @@ class SocialQAOrchestrationService:
             "error": summary.error_count,
         }
         fix_items = self._build_fix_items(results)
-        message = self._build_summary_message(summary_counts, request.campaign_name)
+        message = self._build_summary_message(
+            summary_counts, request.campaign_name, fix_items, request.sheet_url
+        )
 
         record.status = "completed"
         record.message = message
@@ -359,13 +361,33 @@ class SocialQAOrchestrationService:
                 break
         return items
 
-    @staticmethod
     def _build_summary_message(
-        counts: dict[str, int], campaign_name: str
+        self,
+        counts: dict[str, int],
+        campaign_name: str,
+        fix_items: list[str] | None = None,
+        sheet_url: str = "",
     ) -> str:
+        """Slack-ready summary: counts, then surfaced Fix specifics, then a link
+        to the annotated sheet (brief: "fix items with specifics + a link")."""
         label = (campaign_name or "Campaign").strip() or "Campaign"
-        return (
+        lines = [
             f"QA complete for {label} | "
             f"Pass {counts['pass']} | Fix {counts['fix']} | "
             f"Review {counts['review']} | N/A {counts['na']} | Error {counts['error']}"
-        )
+        ]
+
+        fix_items = fix_items or []
+        if fix_items:
+            shown = len(fix_items)
+            total = counts.get("fix", shown)
+            header = f"Fixes ({shown} of {total}):" if total > shown else "Fixes:"
+            lines.append("")
+            lines.append(header)
+            lines.extend(f"• {item}" for item in fix_items)
+
+        if sheet_url:
+            lines.append("")
+            lines.append(f"Sheet: {sheet_url}")
+
+        return "\n".join(lines)

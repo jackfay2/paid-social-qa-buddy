@@ -101,6 +101,22 @@ def test_execute_checks_manual_review_check(monkeypatch) -> None:
     assert results[0].action == "Verify creative manually."
 
 
+def test_download_changes_is_manual_review_even_when_blank() -> None:
+    """The brief's mandated manual check returns Review with instructions even
+    if the builder leaves the input blank (manual gate beats the N/A gate)."""
+    rows = [_row("download_changes", builder_input="")]
+    results = execute_checks(rows, _passing_runner)
+    assert results[0].verdict == "Review"
+    assert "download" in results[0].action.lower()
+
+
+def test_ad_creative_dimensions_is_manual_review() -> None:
+    rows = [_row("ad_creative_dimensions", builder_input="")]
+    results = execute_checks(rows, _passing_runner)
+    assert results[0].verdict == "Review"
+    assert "1x1" in results[0].action and "9x16" in results[0].action
+
+
 def test_execute_checks_force_run_overrides_na(monkeypatch) -> None:
     """A force-run check runs even with blank input."""
     rows = [_row("always_run_check", builder_input="")]

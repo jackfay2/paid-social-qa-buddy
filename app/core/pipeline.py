@@ -27,11 +27,21 @@ CheckRunner = Callable[..., CheckResult]
 # for Social; the Search side uses this for its "downloaded_changes" check.
 ALWAYS_RUN_CHECK_IDS: frozenset[str] = frozenset()
 
-# Manual-by-design checks: always Review with a fixed instruction, never auto-attempted.
-# Keyed by check_id. Populated as Kerri's manual rows get check_ids assigned.
+# Manual-by-design checks: always Review with a fixed instruction, never
+# auto-attempted (handoff hard rule #9). Checked before the blank/N-A gate, so
+# they surface even when the builder leaves the input empty. Keyed by check_id.
 ALWAYS_REVIEW_CHECK_ACTIONS: dict[str, str] = {
-    # Example (pending check_id assignment):
-    # "creative_dimensions_1x1_9x16": "Verify 1x1 and 9x16 creative manually in Ads Manager.",
+    # The brief mandates at least one manual check (download changes).
+    "download_changes": (
+        "Manual check: confirm recent changes were downloaded in Meta Ads "
+        "Manager / Editor before building (or note 'Built in platform')."
+    ),
+    # Template marks this row MANUAL — creative dimensions can't be verified
+    # from BigQuery fields reliably.
+    "ad_creative_dimensions": (
+        "Manual check: verify the 1x1 and 9x16 creative are present and correct "
+        "in Ads Manager."
+    ),
 }
 
 
