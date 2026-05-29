@@ -1255,3 +1255,136 @@ def check_ad_call_to_action(row: CheckRow, *, evidence: dict[str, Any] | None = 
             )
         return _pass(row, f"({len(missing)} of {len(ads)} ads missing a CTA)")
     return _pass(row)
+
+
+# === Ad-set level: conversion event (the Peacock-Olympics check) =============
+#
+# promoted_object.custom_event_type — the optimization/conversion event the ad
+# set is configured for. This is THE check the bot exists for: the Feb 2026
+# Peacock-Olympics incident launched with "purchase event" instead of
+# "purchase" and survived 2-3 rounds of human QA because reviewers glossed over
+# the near-match. The bot must do the opposite of that:
+#
+#   CARDINAL RULE: never Pass unless we are confident expected == actual.
+#   Any ambiguity (a non-standard / unmappable value on either side) → Review,
+#   never a silent Pass. A confident mismatch between two recognized standard
+#   events → Fix.
+#
+# Standard Meta custom_event_type enums. Most friendly labels normalize straight
+# to these (upper-snake), so the synonym map stays small + high-confidence on
+# purpose — anything we can't confidently map escalates to Review.
+_KNOWN_EVENT_TYPES = {
+    "PURCHASE", "LEAD", "COMPLETE_REGISTRATION", "ADD_TO_CART",
+    "ADD_TO_WISHLIST", "ADD_PAYMENT_INFO", "INITIATED_CHECKOUT", "SEARCH",
+    "VIEW_CONTENT", "CONTACT", "SUBSCRIBE", "START_TRIAL", "SUBMIT_APPLICATION",
+    "DONATE", "SCHEDULE", "FIND_LOCATION", "CUSTOMIZE_PRODUCT", "OTHER",
+}
+
+# Only genuine, unambiguous aliases. Deliberately conservative: a wrong synonym
+# would cause a false Pass, which is exactly the failure this check guards.
+_EVENT_SYNONYMS = {
+    "purchases": "PURCHASE",
+    "leads": "LEAD",
+    "registration": "COMPLETE_REGISTRATION",
+    "registrations": "COMPLETE_REGISTRATION",
+    "complete registrations": "COMPLETE_REGISTRATION",
+    "checkout": "INITIATED_CHECKOUT",
+    "initiate checkout": "INITIATED_CHECKOUT",
+    "begin checkout": "INITIATED_CHECKOUT",
+    "payment info": "ADD_PAYMENT_INFO",
+    "wishlist": "ADD_TO_WISHLIST",
+}
+
+_ADSET_EVENT_FIELDS = (
+    "promoted_object.custom_event_type",
+    "custom_event_type",
+)
+
+
+def _canonical_event(value: Any) -> str:
+    """Map a builder label or stored value to a standard custom_event_type enum,
+    or "" if it is not a recognized standard event (i.e. a custom event or
+    garbage). "" is the signal to the caller to escalate to Review rather than
+    risk a false Pass."""
+    norm = _norm(value)
+    if not norm:
+        return ""
+    upper = norm.upper().replace(" ", "_")
+    if upper in _KNOWN_EVENT_TYPES:
+        return upper
+    return _EVENT_SYNONYMS.get(norm, "")
+
+
+def _read_adset_event(adset: dict[str, Any]) -> str:
+    for path in _ADSET_EVENT_FIELDS:
+        value = _read_path(adset, path)
+        if value:
+            return value
+    return ""
+
+
+def check_adset_conversion_event(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
+    ad_sets = _ad_sets(evidence)
+    if not ad_sets:
+        return _review(row, "No ad sets found in BigQuery for this campaign.")
+
+    expected_enum = _canonical_event(row.builder_input)
+    expected_norm = _norm(row.builder_input)
+    if not expected_norm:
+        return _review(row, "Expected conversion event is blank; verify manually.")
+
+    mismatched: list[tuple[str, str]] = []   # confident Fix (both standard, differ)
+    review_ads: list[tuple[str, str]] = []    # ambiguity → escalate, never Pass
+    missing: list[str] = []
+
+    for adset in ad_sets:
+        label = _adset_label(adset)
+        raw = _read_adset_event(adset)
+        if _is_blank(raw):
+            missing.append(label)
+            continue
+        actual_enum = _canonical_event(raw)
+        actual_norm = _norm(raw)
+
+        if expected_enum and actual_enum:
+            # Both recognized standard events — confident comparison.
+            if expected_enum != actual_enum:
+                mismatched.append((label, str(raw)))
+        elif expected_enum and not actual_enum:
+            # Builder expected a standard event but the ad set's value isn't one
+            # (e.g. "purchase event"). This is the Peacock case — escalate.
+            review_ads.append(
+                (label, f'actual event "{raw}" is not a recognized standard event')
+            )
+        elif not expected_enum and actual_enum:
+            review_ads.append(
+                (label, f'expected "{row.builder_input}" is not a recognized standard event')
+            )
+        else:
+            # Neither maps to a standard enum: both custom. Only Pass on an exact
+            # (normalized) string match; otherwise escalate — never guess.
+            if expected_norm != actual_norm:
+                review_ads.append(
+                    (label, f'custom event "{raw}" vs expected "{row.builder_input}"')
+                )
+
+    if mismatched:
+        first_label, first_actual = mismatched[0]
+        more = f" (+{len(mismatched) - 1} more)" if len(mismatched) > 1 else ""
+        return _fix(
+            row,
+            f'Expected conversion event "{row.builder_input}", but {first_label} '
+            f'is set to "{first_actual}"{more}',
+        )
+    if review_ads:
+        label, reason = review_ads[0]
+        more = f" (+{len(review_ads) - 1} more)" if len(review_ads) > 1 else ""
+        return _review(row, f"{label}: {reason}{more}. Verify manually.")
+    if missing:
+        if len(missing) == len(ad_sets):
+            return _review(
+                row,
+                "Conversion event not available in BigQuery for any ad set; verify manually.",
+            )
+        return _pass(row, f"({len(missing)} of {len(ad_sets)} ad sets missing a conversion event)")
+    return _pass(row)

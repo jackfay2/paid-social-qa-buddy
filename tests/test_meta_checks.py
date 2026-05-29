@@ -9,6 +9,7 @@ from app.checks.meta_checks import (
     check_ad_status,
     check_adset_age_max,
     check_adset_age_min,
+    check_adset_conversion_event,
     check_adset_countries,
     check_adset_end_date,
     check_adset_genders,
@@ -919,6 +920,126 @@ def test_cta_no_ads_is_review() -> None:
     assert result.verdict == "Review"
 
 
+# --- adset_conversion_event (the Peacock-Olympics check) -------------------
+
+
+def _adset_with_event(event: str, *, name: str = "", nested: bool = True) -> dict:
+    if nested:
+        return {"id": 1, "name": name, "promoted_object": {"custom_event_type": event}}
+    return {"id": 1, "name": name, "custom_event_type": event}
+
+
+def test_conversion_event_exact_match_passes() -> None:
+    row = _row("adset_conversion_event", "Purchase")
+    result = check_adset_conversion_event(
+        row, evidence=_adset_evidence([_adset_with_event("PURCHASE")])
+    )
+    assert result.verdict == "Pass"
+
+
+def test_conversion_event_casing_only_passes() -> None:
+    """'Purchase' vs stored 'purchase' is just casing → Pass."""
+    row = _row("adset_conversion_event", "Purchase")
+    result = check_adset_conversion_event(
+        row, evidence=_adset_evidence([_adset_with_event("purchase")])
+    )
+    assert result.verdict == "Pass"
+
+
+def test_conversion_event_PEACOCK_near_match_is_NOT_pass() -> None:
+    """THE canonical case: builder expects 'Purchase', ad set is set to
+    'purchase event'. A human glossed over this; the bot must NOT Pass —
+    it escalates to Review (never a silent pass on a near-match)."""
+    row = _row("adset_conversion_event", "Purchase")
+    result = check_adset_conversion_event(
+        row, evidence=_adset_evidence([_adset_with_event("purchase event")])
+    )
+    assert result.verdict == "Review"
+    assert result.verdict != "Pass"
+    assert "not a recognized standard event" in result.action
+
+
+def test_conversion_event_confident_mismatch_is_fix() -> None:
+    """Two recognized standard events that differ → confident Fix."""
+    row = _row("adset_conversion_event", "Purchase")
+    result = check_adset_conversion_event(
+        row, evidence=_adset_evidence([_adset_with_event("LEAD", name="AS1")])
+    )
+    assert result.verdict == "Fix"
+    assert "AS1" in result.action
+
+
+def test_conversion_event_friendly_synonym_passes() -> None:
+    row = _row("adset_conversion_event", "Registration")
+    result = check_adset_conversion_event(
+        row, evidence=_adset_evidence([_adset_with_event("COMPLETE_REGISTRATION")])
+    )
+    assert result.verdict == "Pass"
+
+
+def test_conversion_event_flat_field_read() -> None:
+    row = _row("adset_conversion_event", "Add to Cart")
+    result = check_adset_conversion_event(
+        row, evidence=_adset_evidence([_adset_with_event("ADD_TO_CART", nested=False)])
+    )
+    assert result.verdict == "Pass"
+
+
+def test_conversion_event_custom_exact_match_passes() -> None:
+    """Both sides a non-standard custom event, identical → Pass (exact match)."""
+    row = _row("adset_conversion_event", "lead_q4_2026")
+    result = check_adset_conversion_event(
+        row, evidence=_adset_evidence([_adset_with_event("lead_q4_2026")])
+    )
+    assert result.verdict == "Pass"
+
+
+def test_conversion_event_custom_differ_is_review() -> None:
+    """Two unmappable customs that differ → Review, not Fix (can't be confident)."""
+    row = _row("adset_conversion_event", "lead_q4_2026")
+    result = check_adset_conversion_event(
+        row, evidence=_adset_evidence([_adset_with_event("lead_q3_2026")])
+    )
+    assert result.verdict == "Review"
+
+
+def test_conversion_event_uninterpretable_expected_is_review() -> None:
+    row = _row("adset_conversion_event", "make me money")
+    result = check_adset_conversion_event(
+        row, evidence=_adset_evidence([_adset_with_event("PURCHASE")])
+    )
+    assert result.verdict == "Review"
+
+
+def test_conversion_event_all_missing_is_review() -> None:
+    row = _row("adset_conversion_event", "Purchase")
+    result = check_adset_conversion_event(
+        row, evidence=_adset_evidence([{"id": 1}, {"id": 2}])
+    )
+    assert result.verdict == "Review"
+
+
+def test_conversion_event_no_ad_sets_is_review() -> None:
+    row = _row("adset_conversion_event", "Purchase")
+    result = check_adset_conversion_event(row, evidence=_adset_evidence([]))
+    assert result.verdict == "Review"
+
+
+def test_conversion_event_one_of_many_diverges_is_fix() -> None:
+    row = _row("adset_conversion_event", "Purchase")
+    result = check_adset_conversion_event(
+        row,
+        evidence=_adset_evidence(
+            [
+                _adset_with_event("PURCHASE", name="AS1"),
+                _adset_with_event("LEAD", name="AS2"),
+            ]
+        ),
+    )
+    assert result.verdict == "Fix"
+    assert "AS2" in result.action
+
+
 # --- registry integration --------------------------------------------------
 
 
@@ -936,6 +1057,7 @@ def test_checks_registered() -> None:
     assert "adset_age_max" in CHECK_REGISTRY
     assert "adset_genders" in CHECK_REGISTRY
     assert "adset_countries" in CHECK_REGISTRY
+    assert "adset_conversion_event" in CHECK_REGISTRY
     # Ad checks
     assert "ad_status" in CHECK_REGISTRY
     assert "ad_count" in CHECK_REGISTRY

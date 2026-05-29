@@ -59,7 +59,7 @@ The template mixes two input styles, and they need different check logic:
 | Name - Aligned with Conventions (Yes/No) | name | `adset_name_conventions` | ✋ MANUAL | Auto-verifiable only if naming convention is encoded as a rule; default MANUAL. |
 | Ad Sets that Ads Should Be Live In (Yes/No) | name? | `adset_ads_placement` | 🔨 BUILD | Structural (which ad sets contain live ads vs builder expectation). Review-heavy for MVP. |
 | Conversion Event Location | promoted_object.pixel_id / application_id / offline_conversion_data_set_id | `adset_conversion_location` | 🔨 BUILD | Which of pixel / app / offline dataset is set. |
-| **Event Name** | promoted_object.custom_event_type | `adset_conversion_event` | 🔨 BUILD | **🚨 Peacock-Olympics class** ("purchase event" vs "purchase"). High priority; strict match, Review on ambiguity. |
+| **Event Name** | promoted_object.custom_event_type | `adset_conversion_event` | ✅ BUILT (2026-05-29) | **🚨 Peacock-Olympics check.** Strict standard-event match; near-match like "purchase event" vs "purchase" → Review (never Pass). Confident standard-vs-standard mismatch → Fix. Not green-confirmed but foundational. |
 | Start Date (If Applicable) | start_time | `adset_start_date` | ✅ BUILT | |
 | End Date (If Applicable) | end_time | `adset_end_date` | ✅ BUILT | |
 | Spend Minimum (Yes/No) | daily_min_spend_budget | `adset_spend_minimum` | 🔨 BUILD | Yes/No presence check. |
