@@ -26,6 +26,7 @@ Value-map calibration:
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from typing import Any
 
@@ -1387,4 +1388,218 @@ def check_adset_conversion_event(row: CheckRow, *, evidence: dict[str, Any] | No
                 "Conversion event not available in BigQuery for any ad set; verify manually.",
             )
         return _pass(row, f"({len(missing)} of {len(ad_sets)} ad sets missing a conversion event)")
+    return _pass(row)
+
+
+# === Ad-set level: attribution setting + optimization goal ==================
+#
+# Both confirmed against live BigQuery (C61854560, 2026-05-29):
+#   attribution_spec  = [{'event_type': 'CLICK_THROUGH'|'VIEW_THROUGH',
+#                         'window_days': N}, ...]  (empty [] when not a
+#                        conversion ad set)
+#   optimization_goal = string enum ('CLICKS', 'OFFSITE_CONVERSIONS', ...)
+
+
+# --- adset_attribution_setting ---------------------------------------------
+#
+# Builder dropdown values (MASTER DATA VALIDATION tab): "1-day click",
+# "7-day click", "1-day click, 1-day view", "7-day click, 1-day view".
+# We normalize both sides to a frozenset of (channel, days) and compare.
+
+_ATTR_EVENT_MAP = {"CLICK_THROUGH": "click", "VIEW_THROUGH": "view"}
+_ATTR_TOKEN_RE = re.compile(r"(\d+)\s*-?\s*day\s+(click|view)")
+
+
+def _format_attribution(spec: frozenset[tuple[str, int]]) -> str:
+    order = {"click": 0, "view": 1}
+    parts = sorted(spec, key=lambda cv: (order.get(cv[0], 9), cv[1]))
+    return ", ".join(f"{days}-day {channel}" for channel, days in parts)
+
+
+def _parse_attribution_input(value: Any) -> frozenset[tuple[str, int]] | None:
+    """Parse a friendly attribution string ("7-day click, 1-day view") into a
+    set of (channel, days). None if nothing parseable."""
+    text = _norm(value)
+    if not text:
+        return None
+    found = _ATTR_TOKEN_RE.findall(text)
+    if not found:
+        return None
+    return frozenset((channel, int(days)) for days, channel in found)
+
+
+# Sentinel so "column absent" is distinct from "empty attribution_spec list".
+_MISSING = object()
+
+
+def _parse_attribution_actual(value: Any) -> frozenset[tuple[str, int]] | None:
+    """Parse the stored attribution_spec into a set of (channel, days).
+    Returns None if the value can't be confidently interpreted (→ Review).
+    An empty list parses to an empty frozenset (no attribution window set)."""
+    if isinstance(value, (list, tuple)):
+        result: set[tuple[str, int]] = set()
+        for item in value:
+            if not isinstance(item, dict):
+                return None
+            channel = _ATTR_EVENT_MAP.get(str(item.get("event_type", "")).upper())
+            window = item.get("window_days")
+            if channel is None or window is None:
+                return None
+            try:
+                result.add((channel, int(window)))
+            except (TypeError, ValueError):
+                return None
+        return frozenset(result)
+    if isinstance(value, str):
+        return _parse_attribution_input(value)
+    return None
+
+
+def check_adset_attribution_setting(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
+    ad_sets = _ad_sets(evidence)
+    if not ad_sets:
+        return _review(row, "No ad sets found in BigQuery for this campaign.")
+
+    expected = _parse_attribution_input(row.builder_input)
+    if not expected:
+        return _review(
+            row,
+            f'Could not interpret the expected attribution "{row.builder_input}". '
+            'Use e.g. "7-day click" or "7-day click, 1-day view".',
+        )
+
+    mismatched: list[tuple[str, str]] = []
+    review_ads: list[tuple[str, str]] = []
+    missing: list[str] = []
+
+    for adset in ad_sets:
+        label = _adset_label(adset)
+        raw = adset.get("attribution_spec", _MISSING)
+        if raw is _MISSING or raw is None:
+            missing.append(label)
+            continue
+        actual = _parse_attribution_actual(raw)
+        if actual is None:
+            review_ads.append((label, f'attribution value "{raw}" could not be parsed'))
+            continue
+        if not actual:
+            # Empty spec — ad set has no attribution window (likely not a
+            # conversion ad set). Escalate rather than Fix.
+            review_ads.append(
+                (label, "no attribution window set (may not be a conversion ad set)")
+            )
+            continue
+        if actual != expected:
+            mismatched.append((label, _format_attribution(actual)))
+
+    if mismatched:
+        first_label, first_actual = mismatched[0]
+        more = f" (+{len(mismatched) - 1} more)" if len(mismatched) > 1 else ""
+        return _fix(
+            row,
+            f'Expected attribution "{row.builder_input}", but {first_label} is '
+            f'"{first_actual}"{more}',
+        )
+    if review_ads:
+        label, reason = review_ads[0]
+        more = f" (+{len(review_ads) - 1} more)" if len(review_ads) > 1 else ""
+        return _review(row, f"{label}: {reason}{more}. Verify manually.")
+    if missing:
+        if len(missing) == len(ad_sets):
+            return _review(
+                row,
+                "Attribution setting not available in BigQuery for any ad set; verify manually.",
+            )
+        return _pass(row, f"({len(missing)} of {len(ad_sets)} ad sets missing attribution)")
+    return _pass(row)
+
+
+# --- adset_optimization_goal -----------------------------------------------
+#
+# optimization_goal is a clean string enum in BQ. No dropdown vocabulary in the
+# validation tab yet, so the synonym map is conservative (exact enum + common
+# Meta UI labels); anything unmapped → Review, never a guessed Pass/Fix.
+# Peacock-adjacent (the incident was an optimization-event mistake).
+
+_KNOWN_OPT_GOALS = {
+    "OFFSITE_CONVERSIONS", "ONSITE_CONVERSIONS", "LINK_CLICKS", "CLICKS",
+    "LANDING_PAGE_VIEWS", "IMPRESSIONS", "REACH", "THRUPLAY", "VALUE",
+    "APP_INSTALLS", "LEAD_GENERATION", "QUALITY_LEAD", "QUALITY_CALL",
+    "CONVERSATIONS", "POST_ENGAGEMENT", "PAGE_LIKES", "EVENT_RESPONSES",
+    "TWO_SECOND_CONTINUOUS_VIDEO_VIEWS", "AD_RECALL_LIFT", "VISIT_INSTAGRAM_PROFILE",
+}
+
+_OPT_GOAL_SYNONYMS = {
+    "conversions": "OFFSITE_CONVERSIONS",
+    "offsite conversions": "OFFSITE_CONVERSIONS",
+    "link clicks": "LINK_CLICKS",
+    "landing page views": "LANDING_PAGE_VIEWS",
+    "impressions": "IMPRESSIONS",
+    "reach": "REACH",
+    "thruplay": "THRUPLAY",
+    "value": "VALUE",
+    "leads": "LEAD_GENERATION",
+    "lead generation": "LEAD_GENERATION",
+}
+
+
+def _canonical_opt_goal(value: Any) -> str:
+    norm = _norm(value)
+    if not norm:
+        return ""
+    upper = norm.upper().replace(" ", "_")
+    if upper in _KNOWN_OPT_GOALS:
+        return upper
+    return _OPT_GOAL_SYNONYMS.get(norm, "")
+
+
+def check_adset_optimization_goal(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
+    ad_sets = _ad_sets(evidence)
+    if not ad_sets:
+        return _review(row, "No ad sets found in BigQuery for this campaign.")
+
+    expected = _canonical_opt_goal(row.builder_input)
+    if not expected:
+        return _review(
+            row,
+            f'Could not interpret the expected optimization goal "{row.builder_input}". '
+            "Verify manually.",
+        )
+
+    mismatched: list[tuple[str, str]] = []
+    review_ads: list[tuple[str, str]] = []
+    missing: list[str] = []
+
+    for adset in ad_sets:
+        label = _adset_label(adset)
+        raw = adset.get("optimization_goal")
+        if _is_blank(raw):
+            missing.append(label)
+            continue
+        actual = _canonical_opt_goal(raw)
+        if not actual:
+            review_ads.append((label, f'optimization goal "{raw}" not recognized'))
+            continue
+        if actual != expected:
+            mismatched.append((label, str(raw)))
+
+    if mismatched:
+        first_label, first_actual = mismatched[0]
+        more = f" (+{len(mismatched) - 1} more)" if len(mismatched) > 1 else ""
+        return _fix(
+            row,
+            f'Expected optimization goal "{row.builder_input}", but {first_label} '
+            f'is "{first_actual}"{more}',
+        )
+    if review_ads:
+        label, reason = review_ads[0]
+        more = f" (+{len(review_ads) - 1} more)" if len(review_ads) > 1 else ""
+        return _review(row, f"{label}: {reason}{more}. Verify manually.")
+    if missing:
+        if len(missing) == len(ad_sets):
+            return _review(
+                row,
+                "Optimization goal not available in BigQuery for any ad set; verify manually.",
+            )
+        return _pass(row, f"({len(missing)} of {len(ad_sets)} ad sets missing optimization goal)")
     return _pass(row)

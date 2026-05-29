@@ -71,8 +71,8 @@ The template mixes two input styles, and they need different check logic:
 | Interests and/or Custom Audiences (Yes/No) | targeting.custom_audiences | `adset_audiences` | 🔨 BUILD | Yes/No presence. |
 | Audience Exclusions (Yes/No) | targeting.excluded_custom_audiences | `adset_audience_exclusions` | 🔨 BUILD | Yes/No presence. |
 | Placements | targeting.publisher_platforms + *_positions | `adset_placements` | 🔨 BUILD | Compare platform/position set. |
-| Optimization for Ad Delivery | optimization_goal | `adset_optimization_goal` | 🔨 BUILD | Peacock-adjacent (optimization event). |
-| Attribution Delivery Setting | attribution_setting | `adset_attribution_setting` | 🔨 BUILD | |
+| Optimization for Ad Delivery | optimization_goal | `adset_optimization_goal` | ✅ BUILT (2026-05-29) | String-enum value-match; conservative synonyms, Review on unmapped. BQ shape confirmed (e.g. CLICKS, OFFSITE_CONVERSIONS). |
+| Attribution Delivery Setting | attribution_setting (BQ: `attribution_spec`) | `adset_attribution_setting` | ✅ BUILT (2026-05-29) | Parses Meta's `attribution_spec` list ({event_type, window_days}); compares as a set of (channel, days). Dropdown values from validation tab. Empty spec → Review. |
 
 ## Ad level (`facebook_ads__ads`)
 

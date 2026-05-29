@@ -18,10 +18,12 @@ from app.checks.meta_checks import (
     check_ad_status,
     check_adset_age_max,
     check_adset_age_min,
+    check_adset_attribution_setting,
     check_adset_conversion_event,
     check_adset_countries,
     check_adset_end_date,
     check_adset_genders,
+    check_adset_optimization_goal,
     check_adset_start_date,
     check_adset_status,
     check_campaign_bid_strategy,
@@ -55,6 +57,10 @@ CHECK_REGISTRY: dict[str, CheckFunction] = {
     # The Peacock-Olympics check: optimization/conversion event. Strict match,
     # Review on any ambiguity — never a silent Pass on a near-match.
     "adset_conversion_event": check_adset_conversion_event,
+    # Conversion config (shapes confirmed against live BQ): attribution_spec
+    # (list of {event_type, window_days}) and optimization_goal (string enum).
+    "adset_attribution_setting": check_adset_attribution_setting,
+    "adset_optimization_goal": check_adset_optimization_goal,
     # Ad level. Destination URL read defensively across several BQ schemas
     # (link_url, destination_url, creative.link_url, object_story_spec.link).
     "ad_status": check_ad_status,

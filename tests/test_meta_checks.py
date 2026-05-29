@@ -9,8 +9,10 @@ from app.checks.meta_checks import (
     check_ad_status,
     check_adset_age_max,
     check_adset_age_min,
+    check_adset_attribution_setting,
     check_adset_conversion_event,
     check_adset_countries,
+    check_adset_optimization_goal,
     check_adset_end_date,
     check_adset_genders,
     check_adset_start_date,
@@ -1040,6 +1042,139 @@ def test_conversion_event_one_of_many_diverges_is_fix() -> None:
     assert "AS2" in result.action
 
 
+# --- adset_attribution_setting ---------------------------------------------
+
+
+def _adset_with_attr(spec, *, name: str = "") -> dict:
+    return {"id": 1, "name": name, "attribution_spec": spec}
+
+
+def test_attribution_click_and_view_match_passes() -> None:
+    """Builder '7-day click, 1-day view' matches the real BQ spec shape."""
+    row = _row("adset_attribution_setting", "7-day click, 1-day view")
+    spec = [
+        {"event_type": "CLICK_THROUGH", "window_days": 7},
+        {"event_type": "VIEW_THROUGH", "window_days": 1},
+    ]
+    result = check_adset_attribution_setting(
+        row, evidence=_adset_evidence([_adset_with_attr(spec)])
+    )
+    assert result.verdict == "Pass"
+
+
+def test_attribution_order_independent() -> None:
+    row = _row("adset_attribution_setting", "1-day view, 7-day click")
+    spec = [
+        {"event_type": "CLICK_THROUGH", "window_days": 7},
+        {"event_type": "VIEW_THROUGH", "window_days": 1},
+    ]
+    result = check_adset_attribution_setting(
+        row, evidence=_adset_evidence([_adset_with_attr(spec)])
+    )
+    assert result.verdict == "Pass"
+
+
+def test_attribution_single_click_match_passes() -> None:
+    row = _row("adset_attribution_setting", "7-day click")
+    spec = [{"event_type": "CLICK_THROUGH", "window_days": 7}]
+    result = check_adset_attribution_setting(
+        row, evidence=_adset_evidence([_adset_with_attr(spec)])
+    )
+    assert result.verdict == "Pass"
+
+
+def test_attribution_mismatch_is_fix() -> None:
+    row = _row("adset_attribution_setting", "1-day click")
+    spec = [{"event_type": "CLICK_THROUGH", "window_days": 7}]
+    result = check_adset_attribution_setting(
+        row, evidence=_adset_evidence([_adset_with_attr(spec, name="AS1")])
+    )
+    assert result.verdict == "Fix"
+    assert "AS1" in result.action
+    assert "7-day click" in result.action
+
+
+def test_attribution_empty_spec_is_review() -> None:
+    """Empty attribution_spec = no window (non-conversion ad set) → Review."""
+    row = _row("adset_attribution_setting", "7-day click")
+    result = check_adset_attribution_setting(
+        row, evidence=_adset_evidence([_adset_with_attr([])])
+    )
+    assert result.verdict == "Review"
+
+
+def test_attribution_missing_column_is_review() -> None:
+    row = _row("adset_attribution_setting", "7-day click")
+    result = check_adset_attribution_setting(
+        row, evidence=_adset_evidence([{"id": 1}])
+    )
+    assert result.verdict == "Review"
+
+
+def test_attribution_unparseable_expected_is_review() -> None:
+    row = _row("adset_attribution_setting", "whenever")
+    spec = [{"event_type": "CLICK_THROUGH", "window_days": 7}]
+    result = check_adset_attribution_setting(
+        row, evidence=_adset_evidence([_adset_with_attr(spec)])
+    )
+    assert result.verdict == "Review"
+
+
+# --- adset_optimization_goal -----------------------------------------------
+
+
+def test_optimization_goal_exact_enum_passes() -> None:
+    row = _row("adset_optimization_goal", "OFFSITE_CONVERSIONS")
+    result = check_adset_optimization_goal(
+        row, evidence=_adset_evidence([{"id": 1, "optimization_goal": "OFFSITE_CONVERSIONS"}])
+    )
+    assert result.verdict == "Pass"
+
+
+def test_optimization_goal_friendly_conversions_passes() -> None:
+    row = _row("adset_optimization_goal", "Conversions")
+    result = check_adset_optimization_goal(
+        row, evidence=_adset_evidence([{"id": 1, "optimization_goal": "OFFSITE_CONVERSIONS"}])
+    )
+    assert result.verdict == "Pass"
+
+
+def test_optimization_goal_mismatch_is_fix() -> None:
+    row = _row("adset_optimization_goal", "Conversions")
+    result = check_adset_optimization_goal(
+        row,
+        evidence=_adset_evidence(
+            [{"id": 1, "name": "AS1", "optimization_goal": "LINK_CLICKS"}]
+        ),
+    )
+    assert result.verdict == "Fix"
+    assert "AS1" in result.action
+
+
+def test_optimization_goal_unrecognized_expected_is_review() -> None:
+    row = _row("adset_optimization_goal", "make it go viral")
+    result = check_adset_optimization_goal(
+        row, evidence=_adset_evidence([{"id": 1, "optimization_goal": "CLICKS"}])
+    )
+    assert result.verdict == "Review"
+
+
+def test_optimization_goal_unrecognized_actual_is_review() -> None:
+    row = _row("adset_optimization_goal", "Conversions")
+    result = check_adset_optimization_goal(
+        row, evidence=_adset_evidence([{"id": 1, "optimization_goal": "SOME_NEW_GOAL"}])
+    )
+    assert result.verdict == "Review"
+
+
+def test_optimization_goal_missing_is_review() -> None:
+    row = _row("adset_optimization_goal", "Conversions")
+    result = check_adset_optimization_goal(
+        row, evidence=_adset_evidence([{"id": 1}])
+    )
+    assert result.verdict == "Review"
+
+
 # --- registry integration --------------------------------------------------
 
 
@@ -1058,6 +1193,8 @@ def test_checks_registered() -> None:
     assert "adset_genders" in CHECK_REGISTRY
     assert "adset_countries" in CHECK_REGISTRY
     assert "adset_conversion_event" in CHECK_REGISTRY
+    assert "adset_attribution_setting" in CHECK_REGISTRY
+    assert "adset_optimization_goal" in CHECK_REGISTRY
     # Ad checks
     assert "ad_status" in CHECK_REGISTRY
     assert "ad_count" in CHECK_REGISTRY
