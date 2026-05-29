@@ -180,7 +180,9 @@ def execute_text_checks(
         for ad in ads:
             if not isinstance(ad, dict):
                 continue
-            text = _text_checks.extract_ad_text(ad, spec.ad_field)
+            # Try the primary path then per-client fallbacks (object_story_spec
+            # vs flat creative.body/title — confirmed to vary on live data).
+            text = _text_checks.resolve_ad_text(ad, spec)
             if not text:
                 continue
             ad_identifier = str(ad.get("id") or ad.get("ad_id") or len(batch_items))

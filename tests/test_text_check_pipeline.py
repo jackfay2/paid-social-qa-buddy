@@ -127,6 +127,31 @@ def test_text_check_field_paths_match_template() -> None:
     assert defs["ad_description_spelling"].ad_field.endswith(".description")
 
 
+def test_text_check_definitions_have_flat_fallbacks() -> None:
+    """Live BQ (C61854560) stores copy in flat creative.body/title, not
+    object_story_spec — each check must carry a flat fallback path."""
+    defs = text_checks_module.TEXT_CHECK_DEFINITIONS
+    assert "creative.body" in defs["ad_copy_spelling"].fallback_fields
+    assert "creative.title" in defs["ad_headline_spelling"].fallback_fields
+
+
+def test_resolve_ad_text_prefers_primary_then_fallbacks() -> None:
+    spec = text_checks_module.TextCheckDefinition(
+        check_id="t",
+        instruction="x",
+        ad_field="creative.object_story_spec.link_data.message",
+        fallback_fields=("creative.body", "body"),
+    )
+    # primary present
+    ad1 = {"creative": {"object_story_spec": {"link_data": {"message": "primary"}}}}
+    assert text_checks_module.resolve_ad_text(ad1, spec) == "primary"
+    # primary empty → first fallback
+    ad2 = {"creative": {"body": "from-body", "object_story_spec": {}}}
+    assert text_checks_module.resolve_ad_text(ad2, spec) == "from-body"
+    # nothing anywhere
+    assert text_checks_module.resolve_ad_text({"creative": {}}, spec) == ""
+
+
 def test_is_text_check_false_for_unknown_ids() -> None:
     assert text_checks_module.is_text_check("not_a_real_check") is False
     assert text_checks_module.is_text_check("") is False

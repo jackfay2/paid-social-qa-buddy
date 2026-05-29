@@ -34,7 +34,12 @@ class TextCheckDefinition:
 
     check_id: str
     instruction: str
-    ad_field: str  # Dot-path into the ad record, e.g. "body" or "creative.body".
+    ad_field: str  # Primary dot-path into the ad record (the template's column B).
+    # Fallback dot-paths, tried in order when ad_field is empty. Meta creative
+    # copy lives in different places per client/ad: object_story_spec.link_data.*
+    # for some, flat creative.body / creative.title for others (confirmed against
+    # live BQ on C61854560). First non-empty wins.
+    fallback_fields: tuple[str, ...] = ()
 
 
 # The three spelling checks the brief scopes to Gemini (creative copy /
@@ -62,16 +67,19 @@ TEXT_CHECK_DEFINITIONS: dict[str, TextCheckDefinition] = {
         check_id="ad_copy_spelling",
         instruction=_SPELLING_INSTRUCTION.format(part="ad copy (body) text"),
         ad_field="creative.object_story_spec.link_data.message",
+        fallback_fields=("creative.body", "body"),
     ),
     "ad_headline_spelling": TextCheckDefinition(
         check_id="ad_headline_spelling",
         instruction=_SPELLING_INSTRUCTION.format(part="ad headline"),
         ad_field="creative.object_story_spec.link_data.name",
+        fallback_fields=("creative.title", "title"),
     ),
     "ad_description_spelling": TextCheckDefinition(
         check_id="ad_description_spelling",
         instruction=_SPELLING_INSTRUCTION.format(part="ad description"),
         ad_field="creative.object_story_spec.link_data.description",
+        fallback_fields=("creative.description", "description"),
     ),
 }
 
@@ -98,6 +106,19 @@ def extract_ad_text(ad: Any, field: str) -> str:
             return ""
     text = str(current).strip()
     return text
+
+
+def resolve_ad_text(ad: Any, spec: "TextCheckDefinition") -> str:
+    """Return the ad's text for a check, trying the primary field then each
+    fallback in order. First non-empty wins; "" if none have text."""
+    text = extract_ad_text(ad, spec.ad_field)
+    if text:
+        return text
+    for field in spec.fallback_fields:
+        text = extract_ad_text(ad, field)
+        if text:
+            return text
+    return ""
 
 
 def ad_label(ad: Any) -> str:
