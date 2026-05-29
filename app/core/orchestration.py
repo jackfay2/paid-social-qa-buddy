@@ -247,9 +247,7 @@ class SocialQAOrchestrationService:
             "error": summary.error_count,
         }
         fix_items = self._build_fix_items(results)
-        message = self._build_summary_message(
-            summary_counts, request.campaign_name, fix_items, request.sheet_url
-        )
+        message = self._build_summary_message(summary_counts, request, fix_items)
 
         record.status = "completed"
         record.message = message
@@ -364,30 +362,42 @@ class SocialQAOrchestrationService:
     def _build_summary_message(
         self,
         counts: dict[str, int],
-        campaign_name: str,
+        request: "OrchestrationRequest",
         fix_items: list[str] | None = None,
-        sheet_url: str = "",
     ) -> str:
-        """Slack-ready summary: counts, then surfaced Fix specifics, then a link
-        to the annotated sheet (brief: "fix items with specifics + a link")."""
-        label = (campaign_name or "Campaign").strip() or "Campaign"
+        """Slack-ready summary. Mirrors the Search bot's format so both platforms
+        read the same in-thread: a header with the campaign + ids, a Summary
+        counts line, surfaced Fix specifics (our addition, per the brief), the
+        sheet link, and the request_id for traceability.
+        """
+        label = (request.campaign_name or "Campaign").strip() or "Campaign"
+        header = f"QA completed for {label}"
+        ids = []
+        if request.account_id:
+            ids.append(f"account_id={request.account_id}")
+        if request.campaign_id:
+            ids.append(f"campaign_id={request.campaign_id}")
+        if ids:
+            header += f" ({', '.join(ids)})"
+
         lines = [
-            f"QA complete for {label} | "
-            f"Pass {counts['pass']} | Fix {counts['fix']} | "
-            f"Review {counts['review']} | N/A {counts['na']} | Error {counts['error']}"
+            header,
+            f"Summary: Pass {counts['pass']} | Fix {counts['fix']} | "
+            f"Review {counts['review']} | N/A {counts['na']} | Error {counts['error']}",
         ]
 
         fix_items = fix_items or []
         if fix_items:
             shown = len(fix_items)
             total = counts.get("fix", shown)
-            header = f"Fixes ({shown} of {total}):" if total > shown else "Fixes:"
             lines.append("")
-            lines.append(header)
+            lines.append(f"Fixes ({shown} of {total}):" if total > shown else "Fixes:")
             lines.extend(f"• {item}" for item in fix_items)
 
-        if sheet_url:
+        if request.sheet_url:
             lines.append("")
-            lines.append(f"Sheet: {sheet_url}")
+            lines.append(f"Sheet: {request.sheet_url}")
+        if request.request_id:
+            lines.append(f"request_id: {request.request_id}")
 
         return "\n".join(lines)

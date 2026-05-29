@@ -99,10 +99,14 @@ def test_summary_message_includes_fix_specifics_and_sheet_link() -> None:
     service, *_ = _make_service(check_runner=fixing_runner, rows=rows)
     result = service.run(_request(sheet_url="https://docs.google.com/spreadsheets/d/abc/edit"))
 
-    assert "QA complete" in result.message
+    assert "QA completed for Test Campaign" in result.message
+    assert "account_id=123456789" in result.message
+    assert "campaign_id=987654321" in result.message
+    assert "Summary: Pass" in result.message
     assert "Fixes" in result.message
     assert "campaign_objective: Expected X, got Y" in result.message
     assert "Sheet: https://docs.google.com/spreadsheets/d/abc/edit" in result.message
+    assert "request_id: req-1" in result.message
 
 
 def test_summary_message_no_fixes_section_when_all_pass() -> None:
