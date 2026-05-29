@@ -25,6 +25,11 @@ class CloudTasksRequest:
     resolved_campaign_type: str = ""
     resolved_template_family: str = ""
     resolved_tab_name: str = ""
+    # SOCIAL ADDITION: which QA app this request routes to. "search" (default,
+    # backward-compatible) keeps every existing request on the Search path;
+    # "social" routes to the Meta worker. Set by the parser/wiring; read by
+    # RoutingQAQueue to pick the platform queue.
+    qa_app: str = "search"
     entity_filter: dict | None = None
 
 

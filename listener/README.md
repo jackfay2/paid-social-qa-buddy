@@ -13,7 +13,14 @@ test service with the Social changes added; production listener stays unified").
   - `app/listener/*.py` — slack_listener, slack_parser, slack_messages, slack_models, cloud_tasks_service, entity_filter
   - `app/routing.py` — MCC routing (Search)
   - `app/adapters/tasks/` — `CloudTasksQAQueue` (project, location, queue_name, worker_url, service_account_email, OIDC)
-- ⬜ Social-routing addition (plan below)
+- ✅ **Routing core (2026-05-29)** — `qa_app` added to `CloudTasksRequest`
+  (defaults `"search"` → no regression) + `app/listener/platform_router.py`
+  `RoutingQAQueue` routes by `payload.qa_app` (social→social queue,
+  else→search). Her enqueue service is **unmodified** — inject the router as
+  its `queue`. 6 tests in `tests/test_platform_router.py` (run `cd listener && pytest`).
+- ⬜ Wire `qa_app` from intake → envelope: parse `qa_app` in `slack_parser`
+  (alias + field on `SlackParsedRequest`) *or* infer from channel, then set it
+  on the `CloudTasksRequest` the enqueue service builds (3 construction sites).
 - ⬜ Server entrypoint + deploy as `qa-buddy-listener-social-test`
 - ⬜ Separate test Slack app → Events URL → this listener
 
