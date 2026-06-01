@@ -63,7 +63,7 @@ class Settings(BaseSettings):
 
     # Gemini
     gemini_api_key: str = ""
-    qa_gemini_model: str = "gemini-2.0-flash"
+    qa_gemini_model: str = "gemini-2.5-flash"
     qa_gemini_confidence_threshold: float = 0.8
     qa_gemini_timeout_seconds: int = 15
 

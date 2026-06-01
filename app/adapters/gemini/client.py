@@ -31,7 +31,7 @@ import httpx
 _logger = logging.getLogger("paid_social_qa_buddy.gemini")
 
 _API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-_DEFAULT_MODEL = "gemini-2.0-flash"
+_DEFAULT_MODEL = "gemini-2.5-flash"
 _DEFAULT_TIMEOUT_SECONDS = 15
 _DEFAULT_CONFIDENCE_THRESHOLD = 0.8
 
