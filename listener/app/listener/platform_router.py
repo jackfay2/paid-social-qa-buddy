@@ -30,16 +30,31 @@ class RoutingQAQueue:
     and we raise rather than silently sending it to the Search worker.
     """
 
-    def __init__(self, *, search_queue, social_queue=None) -> None:
+    def __init__(self, *, search_queue, social_queue=None, social_channel_ids=None) -> None:
         self._search = search_queue
         self._social = social_queue
+        # Channel-based inference (the locked "listener infers qa_app from the
+        # channel" decision). Her enqueue service leaves qa_app="search" by
+        # default, so without this the router could never see a social request.
+        # A request from one of these channels is treated as social even when
+        # the envelope's qa_app wasn't explicitly set. Her code stays untouched.
+        self._social_channel_ids = frozenset(social_channel_ids or ())
 
     @staticmethod
     def _normalize(qa_app: str | None) -> str:
         return (qa_app or DEFAULT_QA_APP).strip().lower() or DEFAULT_QA_APP
 
-    def enqueue(self, payload: CloudTasksRequest) -> CloudTasksEnqueueResult:
+    def _resolve_qa_app(self, payload: CloudTasksRequest) -> str:
         qa_app = self._normalize(getattr(payload, "qa_app", DEFAULT_QA_APP))
+        if qa_app == "social":
+            return "social"
+        # Infer from channel when not explicitly social.
+        if getattr(payload, "channel_id", "") in self._social_channel_ids:
+            return "social"
+        return qa_app
+
+    def enqueue(self, payload: CloudTasksRequest) -> CloudTasksEnqueueResult:
+        qa_app = self._resolve_qa_app(payload)
         if qa_app == "social":
             if self._social is None:
                 raise ValueError(

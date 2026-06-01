@@ -14,10 +14,10 @@ from app.adapters.tasks import CloudTasksEnqueueResult, CloudTasksRequest
 from app.listener.platform_router import RoutingQAQueue
 
 
-def _payload(qa_app: str = "search") -> CloudTasksRequest:
+def _payload(qa_app: str = "search", channel_id: str = "C1") -> CloudTasksRequest:
     return CloudTasksRequest(
         request_id="r1",
-        channel_id="C1",
+        channel_id=channel_id,
         thread_ts="1.2",
         sheet_url="https://docs.google.com/spreadsheets/d/x/edit",
         customer_id="10152426494631116",
@@ -76,6 +76,31 @@ def test_social_without_social_queue_raises_not_silently_search() -> None:
     with pytest.raises(ValueError):
         router.enqueue(_payload("social"))
     search.enqueue.assert_not_called()
+
+
+def test_social_channel_infers_social_even_when_qa_app_default() -> None:
+    """The locked decision: infer qa_app from the channel. A request from a
+    configured social channel routes social even though her enqueue service
+    left qa_app='search'."""
+    search, social = _mock_queue("search"), _mock_queue("social")
+    router = RoutingQAQueue(
+        search_queue=search, social_queue=social,
+        social_channel_ids={"C0B6ASW9R9V"},
+    )
+    router.enqueue(_payload(qa_app="search", channel_id="C0B6ASW9R9V"))
+    social.enqueue.assert_called_once()
+    search.enqueue.assert_not_called()
+
+
+def test_non_social_channel_stays_search() -> None:
+    search, social = _mock_queue("search"), _mock_queue("social")
+    router = RoutingQAQueue(
+        search_queue=search, social_queue=social,
+        social_channel_ids={"C0B6ASW9R9V"},
+    )
+    router.enqueue(_payload(qa_app="search", channel_id="C_SEARCH"))
+    search.enqueue.assert_called_once()
+    social.enqueue.assert_not_called()
 
 
 def test_envelope_defaults_qa_app_to_search() -> None:

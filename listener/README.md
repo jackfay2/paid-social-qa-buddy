@@ -18,11 +18,26 @@ test service with the Social changes added; production listener stays unified").
   `RoutingQAQueue` routes by `payload.qa_app` (social→social queue,
   else→search). Her enqueue service is **unmodified** — inject the router as
   its `queue`. 6 tests in `tests/test_platform_router.py` (run `cd listener && pytest`).
-- ⬜ Wire `qa_app` from intake → envelope: parse `qa_app` in `slack_parser`
-  (alias + field on `SlackParsedRequest`) *or* infer from channel, then set it
-  on the `CloudTasksRequest` the enqueue service builds (3 construction sites).
-- ⬜ Server entrypoint + deploy as `qa-buddy-listener-social-test`
-- ⬜ Separate test Slack app → Events URL → this listener
+- ✅ **`qa_app` intake via channel inference (2026-06-01)** — `RoutingQAQueue`
+  now takes `social_channel_ids` and routes social when `payload.channel_id` is
+  a configured social channel (the locked "listener infers from channel"
+  decision). This keeps **her enqueue service 100% unmodified** — no editing the
+  3 `CloudTasksRequest` construction sites; the router infers right before
+  enqueue. 10 tests in `tests/test_platform_router.py`.
+- ⬜ **Server entrypoint** — focused FastAPI app: `POST /slack/events` (verify
+  signing secret, url_verification challenge, 3s ack + background processing),
+  wiring two `CloudTasksQAQueue`s (search = `qa-buddy-runs` → her worker; social
+  = `qa-buddy-runs-social-test` → our worker URL + OIDC) into a `RoutingQAQueue`
+  with `social_channel_ids={C0B6ASW9R9V}`, injected into
+  `SlackCloudTasksEnqueueService(queue=router, run_store=…)`. Coupling to map:
+  her enqueue service needs a `run_store` (for dedupe/retry-window) — check
+  which methods it calls + back it with Firestore or in-memory for the test.
+- ⬜ Deploy as `qa-buddy-listener-social-test` (Cloud Run, reuse
+  `test-slack-bot-token` + `test-slack-signing-secret` from Secret Manager).
+- ⬜ **Same-bot repoint (not a separate app):** point the existing test Slack
+  app's Events URL at this listener (Maya/Slack admin). Our copy carries her full
+  Search routing, so Search behaves identically — it just adds Social. One URL,
+  one shared listener = the prod topology.
 
 ## How her enqueue works (the routing seam)
 
