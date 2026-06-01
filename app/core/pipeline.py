@@ -36,6 +36,11 @@ ALWAYS_RUN_CHECK_IDS: frozenset[str] = frozenset(
     }
 )
 
+# Max ads whose copy is sent to Gemini per job. Bounds the single batched call
+# so a large campaign can't produce a giant/expensive prompt. If a campaign has
+# more, the text-check result says so (no silent truncation).
+TEXT_CHECK_AD_CAP = 25
+
 # Manual-by-design checks: always Review with a fixed instruction, never
 # auto-attempted (handoff hard rule #9). Checked before the blank/N-A gate, so
 # they surface even when the builder leaves the input empty. Keyed by check_id.
@@ -178,6 +183,16 @@ def execute_text_checks(
 
     ads = ads or []
 
+    # Bound the Gemini batch: a campaign can have hundreds/thousands of ads, and
+    # one Gemini call with (rows x all ads) items would be huge + costly. Cap the
+    # ads sent for text checks; if there are more, we surface it (NOT a silent
+    # truncation) so a human knows to spot-check the rest.
+    total_ads = len([a for a in ads if isinstance(a, dict)])
+    truncated_from = 0
+    if total_ads > TEXT_CHECK_AD_CAP:
+        ads = [a for a in ads if isinstance(a, dict)][:TEXT_CHECK_AD_CAP]
+        truncated_from = total_ads
+
     # Build the Gemini batch: one item per (row, ad-with-text). The
     # `check_id` field on each batch item is a compound key the Gemini
     # adapter uses to key its response — decoded back to (row, ad) on merge.
@@ -212,10 +227,18 @@ def execute_text_checks(
     if not isinstance(raw_results, dict):
         raw_results = {}
 
-    return [
+    results = [
         _aggregate_text_row(row, row_to_ad_keys.get(row.row_index, []), raw_results)
         for row in text_rows
     ]
+    if truncated_from:
+        note = (
+            f" (Spelling checked on the first {TEXT_CHECK_AD_CAP} of "
+            f"{truncated_from} ads — review the rest manually.)"
+        )
+        for r in results:
+            r.action = (r.action + note).strip()
+    return results
 
 
 def _aggregate_text_row(

@@ -378,3 +378,19 @@ def test_builder_input_and_notes_propagate_to_result(two_text_checks) -> None:
     results = execute_text_checks([row], [_ad("a1", body="good")], gem)
     assert results[0].builder_input == "no typos"
     assert results[0].builder_notes == "reviewer A"
+
+
+def test_batch_capped_at_ad_limit_with_note(two_text_checks) -> None:
+    """A large campaign must not send all ads to Gemini in one call — cap it,
+    and say so (no silent truncation)."""
+    from app.core.pipeline import TEXT_CHECK_AD_CAP
+
+    gem = _FakeGemini({"check_results": {}})
+    # one text-check row, many ads with text
+    ads = [_ad(f"a{i}", body=f"copy {i}") for i in range(TEXT_CHECK_AD_CAP + 20)]
+    rows = [_row("creative_spelling")]
+    results = execute_text_checks(rows, ads, gem)
+    # batch sent to Gemini is bounded by the cap
+    assert len(gem.last_batch) <= TEXT_CHECK_AD_CAP
+    # and the result discloses the truncation
+    assert "review the rest manually" in results[0].action.lower()
