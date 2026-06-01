@@ -32,7 +32,9 @@ _logger = logging.getLogger("paid_social_qa_buddy.gemini")
 
 _API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 _DEFAULT_MODEL = "gemini-2.5-flash"
-_DEFAULT_TIMEOUT_SECONDS = 15
+# A batched call on gemini-2.5-flash can take 30-40s; 60s leaves headroom so a
+# slow batch never times out into an all-Review fail-safe. (Worker stop is 720s.)
+_DEFAULT_TIMEOUT_SECONDS = 60
 _DEFAULT_CONFIDENCE_THRESHOLD = 0.8
 
 _ALLOWED_VERDICTS = {"Pass", "Fix", "Review"}
@@ -90,14 +92,22 @@ class GeminiClient:
             return _review_all(batch, "Gemini not configured; verify text manually.")
 
         prompt = self._build_prompt(batch)
+        # Force raw JSON output so we don't have to strip markdown fences.
+        generation_config: dict[str, Any] = {"responseMimeType": "application/json"}
+        # gemini-2.5-* models run "thinking" by default, which roughly triples
+        # latency (a 46-item batch took ~37s vs ~6s) and burns extra tokens for
+        # no quality gain on these narrow yes/no spelling judgments. Disable it.
+        # Only 2.5 models accept thinkingConfig, so gate on the model name to
+        # avoid a 400 on other models.
+        if "2.5" in self.config.model:
+            generation_config["thinkingConfig"] = {"thinkingBudget": 0}
         try:
             response = self._http.post(
                 _API_URL.format(model=self.config.model),
                 params={"key": self.config.api_key},
                 json={
                     "contents": [{"parts": [{"text": prompt}]}],
-                    # Force raw JSON output so we don't have to strip markdown fences.
-                    "generationConfig": {"responseMimeType": "application/json"},
+                    "generationConfig": generation_config,
                 },
             )
         except httpx.RequestError as exc:

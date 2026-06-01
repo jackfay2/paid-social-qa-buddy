@@ -65,7 +65,11 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     qa_gemini_model: str = "gemini-2.5-flash"
     qa_gemini_confidence_threshold: float = 0.8
-    qa_gemini_timeout_seconds: int = 15
+    # A batched call (up to TEXT_CHECK_AD_CAP ads x several text checks) on
+    # gemini-2.5-flash takes ~30-40s with thinking on; even with thinking
+    # disabled we leave generous headroom so a slow batch never times out and
+    # fail-safes the whole job to Review. Worker hard-stop is 720s, so 60s is safe.
+    qa_gemini_timeout_seconds: int = 60
 
     # Worker runtime — brief specifies a 12-minute hard stop (720s).
     qa_worker_max_runtime_seconds: int = 720

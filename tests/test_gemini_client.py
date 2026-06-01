@@ -171,6 +171,42 @@ def test_handles_json_array_of_single_key_objects() -> None:
 # --- stub ------------------------------------------------------------------
 
 
+def test_disables_thinking_for_2_5_models() -> None:
+    """gemini-2.5-* runs 'thinking' by default (~3x latency). The request must
+    set thinkingConfig.thinkingBudget=0 so a batched call doesn't time out into
+    an all-Review fail-safe."""
+    response = _gemini_response(
+        {"ad_copy_spelling": {"verdict": "Pass", "confidence": 0.99, "reason": ""},
+         "headline_spelling": {"verdict": "Pass", "confidence": 0.99, "reason": ""}}
+    )
+    http = MagicMock(spec=httpx.Client)
+    http.post.return_value = response
+    GeminiClient(
+        config=GeminiConfig(api_key="k", model="gemini-2.5-flash"),
+        http_client=http,
+    ).run_text_checks(_BATCH)
+    sent = http.post.call_args.kwargs["json"]["generationConfig"]
+    assert sent["thinkingConfig"] == {"thinkingBudget": 0}
+    assert sent["responseMimeType"] == "application/json"
+
+
+def test_no_thinking_config_for_non_2_5_models() -> None:
+    """thinkingConfig is a 2.5-only field — must NOT be sent to other models
+    (would 400)."""
+    response = _gemini_response(
+        {"ad_copy_spelling": {"verdict": "Pass", "confidence": 0.99, "reason": ""},
+         "headline_spelling": {"verdict": "Pass", "confidence": 0.99, "reason": ""}}
+    )
+    http = MagicMock(spec=httpx.Client)
+    http.post.return_value = response
+    GeminiClient(
+        config=GeminiConfig(api_key="k", model="gemini-2.0-flash"),
+        http_client=http,
+    ).run_text_checks(_BATCH)
+    sent = http.post.call_args.kwargs["json"]["generationConfig"]
+    assert "thinkingConfig" not in sent
+
+
 def test_stub_reviews_all() -> None:
     result = StubGeminiClient().run_text_checks(_BATCH)["check_results"]
     assert all(r["verdict"] == "Review" for r in result.values())
