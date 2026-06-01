@@ -112,6 +112,14 @@ The Social **test** path is live on Cloud Run — first real deploy:
 - **For the true `@-mention`:** only Gate 3 remains — Maya's listener routing (`qa_app=social` → `qa-buddy-runs-social[-test]` → our worker URL with OIDC). Every other leg is proven on real infra.
 - **To re-run the deployed worker manually:** post a Slack ack to get a `thread_ts`, then `gcloud tasks create-http-task --queue=qa-buddy-runs-social-test --url=<worker>/tasks/qa/run --oidc-service-account-email=ppc-qa-buddy@… --oidc-token-audience=<worker> --body-content='{envelope}'`. Worker URL: `https://qa-buddy-worker-social-test-637315940254.us-west1.run.app`.
 
+## 🏁 FULL @-MENTION E2E PROVEN (2026-06-01)
+
+A real Slack `@-mention` in `#social-qa-buddy-testing` ran the entire flow on live infra: `@Social QA Test` ack → listener parsed (17-digit Meta account_id accepted, social inferred by channel) → `qa-buddy-runs-social-test` queue → OIDC → worker → live BigQuery (75 ad sets) → 26-check registry → **wrote verdicts to the sheet** (cleared first, confirmed filled) → posted `QA completed … Pass 5 | Fix 5 | Review 2` in the thread. Identical to Maya's Search screenshots, for Social. Test-path blockers all closed (listener, deploy, Slack URL, sheet write).
+
+**Separate Social test Slack app** (Jack created it, owns the creds): bot user id `U0B71RZQU4X` (`social_qa_test`, "Testing Environment" workspace); creds in Secret Manager as `social-test-slack-bot-token` + `social-test-slack-signing-secret`. Its Events URL points at our listener; Maya's `@QA Buddy Bot Test` is untouched (no repoint). Two bugs found+fixed during the live test: (1) account_id 10-digit validation rejected the Meta id → relaxed for social channels (`slack_parser`); (2) listener was configured with Maya's bot id `U0B3EJ7PZ5Z` → set `SLACK_BOT_USER_ID=U0B71RZQU4X` so it recognizes its own mention.
+
+**Remaining for full QA (pilot) — not the flow, the coverage:** Kerri's final check_id list + naming convention (gated on her return), the remaining unbuilt checks, Gemini validation against a real ad with populated creative, then prod promotion.
+
 ## Deployed test listener (2026-06-01)
 
 The merged search+social listener is deployed (idle until the Events-URL repoint):
