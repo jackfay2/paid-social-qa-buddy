@@ -185,8 +185,16 @@ class GeminiClient:
                 inner = inner.lstrip()[4:]
             text = inner.strip()
         result = json.loads(text)
+        # gemini-2.5-flash often returns a JSON ARRAY of single-key objects
+        # ([{"<check_id>": {...}}, ...]) instead of one flat object — merge it.
+        if isinstance(result, list):
+            merged: dict[str, Any] = {}
+            for item in result:
+                if isinstance(item, dict):
+                    merged.update(item)
+            result = merged
         if not isinstance(result, dict):
-            raise ValueError("Gemini JSON was not an object")
+            raise ValueError("Gemini JSON was not an object or list of objects")
         return result
 
 

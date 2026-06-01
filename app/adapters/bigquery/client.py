@@ -146,11 +146,14 @@ class BigQueryMetaClient:
         return result
 
     def get_ads(self, client_id: str, campaign_id: str) -> list[dict[str, Any]]:
-        """Fetch all ads under a campaign (SELECT *). Returns [] if none.
+        """Fetch all ads under a campaign (SELECT *), with creative copy merged.
 
-        The ads table holds a denormalized `creative` RECORD, so copy/headline/
-        CTA/landing-URL fields come back nested: ad["creative"]["title"], etc.
-        SELECT * for per-client schema-variance robustness (see get_campaign).
+        The ad COPY (body), headline (title), and object_story_spec live in a
+        SEPARATE table `facebook_ads__ad_creatives`, linked by `ad_creative_id`
+        — NOT denormalized on the ad (confirmed live 2026-06-01, C61854560).
+        We fetch those and merge them into `ad["creative"]` so the creative-
+        reading checks (copy/headline spelling, CTA, landing URL) get the real
+        text. SELECT * for per-client schema-variance robustness (see get_campaign).
         """
         self._validate_ids(client_id, campaign_id)
         cache_key = ("ads", client_id, campaign_id)
@@ -161,8 +164,43 @@ class BigQueryMetaClient:
         query = f"SELECT * FROM {table} WHERE campaign_id = @campaign_id"
         rows = self._run_query(query, campaign_id)
         result = [dict(row) for row in rows]
+        self._attach_creatives(client_id, result)
         self._cache[cache_key] = result
         return result
+
+    def _attach_creatives(self, client_id: str, ads: list[dict[str, Any]]) -> None:
+        """Merge each ad's row from facebook_ads__ad_creatives into ad['creative'].
+
+        Keyed by `ad_creative_id` → creatives table `id`. Defensive: if the
+        table/columns are absent for this client, or the fetch fails, leave the
+        ads as-is (the creative-reading checks then return Review, not Fix).
+        """
+        creative_ids = sorted(
+            {str(a.get("ad_creative_id")) for a in ads if a.get("ad_creative_id")}
+        )
+        if not creative_ids:
+            return
+        table = self._table_ref(client_id, "facebook_ads__ad_creatives")
+        query = f"SELECT * FROM {table} WHERE CAST(id AS STRING) IN UNNEST(@ids)"
+        try:
+            job_config = bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ArrayQueryParameter("ids", "STRING", creative_ids)
+                ]
+            )
+            rows = list(self._client.query(query, job_config=job_config).result())
+        except Exception as exc:  # noqa: BLE001 — schema variance; degrade to no-merge
+            _logger.info(
+                "ad_creatives_fetch_skipped", extra={"error": str(exc)[:200]}
+            )
+            return
+        by_id = {str(dict(r).get("id")): dict(r) for r in rows}
+        for ad in ads:
+            creative = by_id.get(str(ad.get("ad_creative_id")))
+            if creative:
+                existing = ad.get("creative")
+                base = existing if isinstance(existing, dict) else {}
+                ad["creative"] = {**base, **creative}
 
     def _run_query(self, query: str, campaign_id: str) -> list[Any]:
         """Execute a parameterized query against the configured BQ project."""

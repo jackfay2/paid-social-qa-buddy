@@ -153,6 +153,21 @@ def test_handles_markdown_fenced_json() -> None:
     assert result["ad_copy_spelling"]["verdict"] == "Pass"
 
 
+def test_handles_json_array_of_single_key_objects() -> None:
+    """gemini-2.5-flash often returns [{"id": {...}}, {"id2": {...}}] instead of
+    a flat object — must merge, not fail to Review (the live-data bug)."""
+    response = MagicMock(spec=httpx.Response)
+    response.status_code = 200
+    arr = json.dumps([
+        {"ad_copy_spelling": {"verdict": "Pass", "confidence": 0.99, "reason": "ok"}},
+        {"headline_spelling": {"verdict": "Fix", "confidence": 0.97, "reason": "typo"}},
+    ])
+    response.json.return_value = {"candidates": [{"content": {"parts": [{"text": arr}]}}]}
+    result = _client(response).run_text_checks(_BATCH)["check_results"]
+    assert result["ad_copy_spelling"]["verdict"] == "Pass"
+    assert result["headline_spelling"]["verdict"] == "Fix"
+
+
 # --- stub ------------------------------------------------------------------
 
 
