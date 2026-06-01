@@ -118,7 +118,21 @@ A real Slack `@-mention` in `#social-qa-buddy-testing` ran the entire flow on li
 
 **Separate Social test Slack app** (Jack created it, owns the creds): bot user id `U0B71RZQU4X` (`social_qa_test`, "Testing Environment" workspace); creds in Secret Manager as `social-test-slack-bot-token` + `social-test-slack-signing-secret`. Its Events URL points at our listener; Maya's `@QA Buddy Bot Test` is untouched (no repoint). Two bugs found+fixed during the live test: (1) account_id 10-digit validation rejected the Meta id → relaxed for social channels (`slack_parser`); (2) listener was configured with Maya's bot id `U0B3EJ7PZ5Z` → set `SLACK_BOT_USER_ID=U0B71RZQU4X` so it recognizes its own mention.
 
-**Remaining for full QA (pilot) — not the flow, the coverage:** Kerri's final check_id list + naming convention (gated on her return), the remaining unbuilt checks, Gemini validation against a real ad with populated creative, then prod promotion.
+**Remaining for full QA (pilot) — not the flow, the coverage:** Kerri's final check_id list + naming convention (gated on her return), the remaining unbuilt checks, then prod promotion. (Gemini live-firing validation — ✅ done 2026-06-01, see below.)
+
+## 🤖 GEMINI TEXT CHECKS FIRING LIVE (2026-06-01)
+
+The deployed test worker now runs the Gemini spelling checks on real creative end-to-end — verified via a real Cloud Task on `qa-buddy-runs-social-test` (queue → OIDC → worker → BigQuery → Gemini → sheet write). Image `test-20260601-160949`, revision `00007-pws`.
+
+- **Test campaign for creative-bearing demos:** `account_id=10152426494631116` → `C61854560`, `campaign_id=6257219750556` (`WP_PR_T_LPV_Traffic-BoostedArticles`, 953 ads, copy+headline populated; **no** `description` field for this client). Resolves uniquely. Sheet `1b8hp0…c8`, tab `Meta QA`; **verdict cols: G = "Pass or Fix", H = "Action"** (located by header name via `detect_output_header_map`).
+- **Sheet wiring:** the three Gemini check_ids now live in column A — `ad_copy_spelling` (row 41), `ad_headline_spelling` (row 42), `ad_description_spelling` (row 43). Result of the live run: copy=**Pass**, headline=**Pass**, description=**Review** ("no ad text available" — correctly NOT a false Pass since this client lacks the field). Full tally: Pass 8 / Fix 4 / Review 3.
+- **Three code fixes shipped to make this work (commits on 2026-06-01):**
+  1. **Ad copy lives in a separate table.** `facebook_ads__ad_creatives` (body/title/object_story_spec), linked by `ad_creative_id`→`id` — NOT denormalized on the ad. `get_ads` now fetches + merges into `ad["creative"]` (defensive try/except for schema variance). 951/953 ads got `creative.body`.
+  2. **gemini-2.5-flash timed out into all-Review.** A batched call (25 ads × copy+headline ≈ 46 items) took ~37s on the 15s client timeout → ReadTimeout → whole job fail-safed to Review (never a real verdict). **Fix:** raise default timeout to **60s** AND send `thinkingConfig.thinkingBudget=0` for any `2.5` model (thinking ~tripled latency for zero gain on yes/no spelling). Cut a real batch to ~12s. Verified: clean ads→Pass, injected typo→Fix with specific corrections.
+  3. **Batch bound.** `TEXT_CHECK_AD_CAP=25` in `pipeline.py` caps ads sent to Gemini (the 953-ad campaign would be a huge prompt). When >cap, each text-check result appends "(Spelling checked on the first 25 of N ads — review the rest manually.)" — no silent truncation.
+  - Also: gemini-2.5-flash returns a JSON *array* of single-key objects (not a flat object); `_extract_json` merges arrays. And `_DEFAULT_MODEL` is `gemini-2.5-flash` (2.0 was deprecated/404).
+- **Live @-mention demo (Slack post leg):** `@Social QA Test` then `sheet_url: …/d/1b8hp0…c8/edit` / `account_id: 10152426494631116` / `campaign_id: 6257219750556`. (My queue-driven verify omitted `channel_id`/`thread_ts` to keep the channel clean, so it didn't post to Slack — the @-mention exercises that last leg.)
+- **Manual-verify gotcha:** an impersonated ID token (`gcloud auth print-identity-token --impersonate-service-account …`) is rejected by the worker with `Token email is not verified`. To trigger the deployed worker by hand, enqueue a real Cloud Task (`gcloud tasks create-http-task --queue=qa-buddy-runs-social-test …`) — Cloud Tasks mints a properly-verified OIDC token. Also: the worker's expected OIDC audience is the **old-style** URL `https://qa-buddy-worker-social-test-kkih6nvcjq-uw.a.run.app` (in its `QA_CLOUD_TASKS_OIDC_AUDIENCE`), not the `-637315940254` one — use that as both `--url` host and `--oidc-token-audience`.
 
 ## Deployed test listener (2026-06-01)
 
@@ -160,7 +174,8 @@ Lock these three in a shared doc before either repo ships changes. They are the 
 - **Prod traffic is revision-pinned.** `gcloud run services update --image` alone does NOT shift traffic. Use 2-step: `--no-traffic` then `update-traffic --to-revisions <new>=100`.
 - **Promote prod by re-tagging the tested image digest**, not by rebuilding. Keeps test/prod byte-identical.
 - **Cloud Build VPC-SC log streaming error is expected** for this project. Verify build success with `gcloud builds describe <id> --region=global --format='value(status)'`, not by log streaming.
-- **Trust `/readyz` for rollout health**, not CLI success text.
+- **The VPC-SC streaming error ABORTS `deploy/build_and_deploy_worker.sh`** (it's `set -e`, and `gcloud builds submit` exits non-zero on the streaming failure even though the build itself succeeds server-side). Net effect: the build runs but the deploy steps never execute, and a `| tee` makes the whole pipeline look like exit 0. **Run build and deploy as SEPARATE steps:** `gcloud builds submit … --tag=…:test-<TS>`, confirm `gcloud builds describe <id>` = SUCCESS, then `gcloud run deploy --image=…:test-<TS>` manually (the service already has its IAM binding + OIDC audience, so a plain image-swap deploy with the full env+secrets is enough).
+- **Trust `/readyz` for rollout health**, not CLI success text. (Worker is private, so curl `/readyz` with an impersonated ID token: `TOKEN=$(gcloud auth print-identity-token --impersonate-service-account=ppc-qa-buddy@… --audiences=<URL>); curl -H "Authorization: Bearer $TOKEN" <URL>/readyz`.)
 
 ## Reference paths
 
