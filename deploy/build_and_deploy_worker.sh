@@ -66,16 +66,29 @@ if [[ "${ENVIRONMENT}" == "test" ]]; then
     --set-secrets="${SECRETS}"
 
   URL="$(gcloud run services describe "${SERVICE}" --project="${PROJECT}" --region="${REGION}" --format='value(status.url)')"
-  echo ">> Service URL: ${URL}"
+  echo ">> Service URL (status.url): ${URL}"
+
+  # ⚠️ A Cloud Run service answers to TWO URL aliases (project-number form
+  # `…-637315940254.…run.app` and hash form `…-kkih6nvcjq-uw.a.run.app`), and
+  # status.url can return either. The OIDC audience the worker EXPECTS must
+  # byte-match the audience the LISTENER signs (its SOCIAL_WORKER_AUDIENCE) or
+  # every Cloud Tasks delivery 401s (broke the @-mention 2026-06-01). So pin the
+  # audience to the listener's value, NOT to status.url. Falls back to status.url
+  # only if the listener isn't deployed yet.
+  AUDIENCE="$(gcloud run services describe qa-buddy-listener-social-test \
+    --project="${PROJECT}" --region="${REGION}" --format='json' 2>/dev/null \
+    | python3 -c 'import json,sys; e={x["name"]:x.get("value") for x in json.load(sys.stdin)["spec"]["template"]["spec"]["containers"][0]["env"]}; print(e.get("SOCIAL_WORKER_AUDIENCE",""))' 2>/dev/null)"
+  [[ -n "${AUDIENCE}" ]] || AUDIENCE="${URL}"
+  echo ">> OIDC audience (must match listener SOCIAL_WORKER_AUDIENCE): ${AUDIENCE}"
 
   echo ">> Granting the SA run.invoker on ${SERVICE} (queue OIDC -> worker)..."
   gcloud run services add-iam-policy-binding "${SERVICE}" \
     --project="${PROJECT}" --region="${REGION}" \
     --member="serviceAccount:${SA}" --role="roles/run.invoker"
 
-  echo ">> Second pass: enable OIDC auth with audience=${URL}..."
+  echo ">> Second pass: enable OIDC auth with audience=${AUDIENCE}..."
   gcloud run services update "${SERVICE}" --project="${PROJECT}" --region="${REGION}" \
-    --update-env-vars="QA_CLOUD_TASKS_AUTH_REQUIRED=true,QA_CLOUD_TASKS_OIDC_AUDIENCE=${URL}"
+    --update-env-vars="QA_CLOUD_TASKS_AUTH_REQUIRED=true,QA_CLOUD_TASKS_OIDC_AUDIENCE=${AUDIENCE}"
 
   echo "Done. Hand Maya: QA_CLOUD_TASKS_WORKER_URL_SOCIAL=${URL}/tasks/qa/run"
   echo "Check health: curl -s ${URL}/readyz  (expect 200; 503 = a secret failed to resolve)"
