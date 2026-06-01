@@ -276,16 +276,27 @@ Durable facts from the brief — keep in mind across the project:
 
 ## Next actions (when resuming work)
 
-**End state as of 2026-05-29 (big day):** the **test worker is deployed and proven E2E on live infra** — a hand-enqueued Cloud Task ran queue → OIDC → Cloud Run worker → live BigQuery → 19 checks → verdicts written to a real sheet + summary posted to `#social-qa-buddy-testing` (`Pass 5 | Fix 5 | Review 2`). GCP test path provisioned (queue, SA IAM incl. `bigquery.jobUser`, Cloud Run, OIDC, BigQuery API enabled). Listener copy started: vendored + social-routing core (`RoutingQAQueue` + `qa_app` envelope) built & tested. 345 worker tests + 6 listener tests green.
+**End state as of 2026-06-01 (big day):** the **full `@-mention` flow works end-to-end on live test infra AND the 3 Gemini text checks fire live** — a real `@Social QA Test` mention ran listener → `qa-buddy-runs-social-test` queue → OIDC → Cloud Run worker → live BigQuery (953 ads + `facebook_ads__ad_creatives` merge) → 16 deterministic + 3 Gemini checks → verdicts written to the sheet → summary posted to `#social-qa-buddy-testing` **as our own bot** (`Pass 8 | Fix 4 | Review 3`). Worker on image `test-20260601-160949`, serving revision `00009-srp`, `/readyz` 200. 360 worker tests + 18 listener tests green. All today's fixes committed + pushed to `origin/main`.
 
-**The ONLY blocker to a true `@-mention` is the listener leg.** Everything downstream is proven on real infra.
+**The flow is proven. Tomorrow is about coverage + the production cutover, not the plumbing.**
 
-Next (in order):
-1. **Finish the listener copy** (ours, mostly unblocked) — see `listener/README.md`: (a) wire `qa_app` from intake → the `CloudTasksRequest` envelope (parse in `slack_parser` or infer from channel), (b) a focused FastAPI server entrypoint wiring both queues via `RoutingQAQueue`, (c) deploy as `qa-buddy-listener-social-test`.
-2. **Test Slack app** (needs Maya/Slack admin) — a separate test Slack app whose Events URL → our test listener (one app = one Events URL, so we can't reuse `@QA Buddy Bot Test`). THE one external dependency for the `@-mention` flow.
-3. **Brandon** — the Yes/No-vs-value-match decision (blocks ~4 confirmed checks: spend min/max, naming, audiences, exclusions) + bless the `check_id` list (`docs/meta_qa_template_mapping.md`).
-4. **Expand checks** as Brandon answers + as the template `Check_ID` column is finalized.
-5. **Prod promotion** — `deploy/build_and_deploy_worker.sh prod` (re-tag tested digest, 2-step traffic) once the test flow is validated end-to-end.
+Tomorrow (2026-06-02; MVP target 2026-06-05 — tight, so fire the async items first):
+
+**First 15 min — confirm + tidy:**
+1. Smoke the live path: `/readyz` on worker + listener (200), one `@Social QA Test` mention to confirm overnight stability; locally `source .venv/bin/activate && pytest tests/test_cloud_tasks_queue.py tests/test_prompt16_smoke_flow.py tests/test_slack_listener.py`.
+2. Housekeeping: delete the "[automated pre-check]" thread; optionally blank verdict cols G/H on the test sheet for a clean Kerri before/after.
+
+**Send first thing — async unblocks:**
+3. **Kerri** — follow up on the one-pager for the 3 decisions: final `check_id` list, naming convention, MVP check priority (gates finalizing the registry).
+4. **Maya** — lock the coordination contract (envelope schema + `qa_app` naming, worker URL/queue, Slack-thread protocol) and agree the Events-URL repoint plan for the true shared listener (today we run a separate Social app → our listener; prod is her one listener routing to our worker).
+
+**Main focus — unblocked build:**
+5. Confirm BigQuery field coverage: dig `facebook_ads__*` schema → the definitive "Phase-1 deterministic vs Review-by-design (field not in BQ / Riley+Nikki sprint)" map. Tells you exactly what's buildable now.
+6. Wire + expand checks: the 4 presence checks (`adset_spend_minimum/maximum/audiences/audience_exclusions`) have code but aren't in the test sheet's column A yet — wire + confirm they fire. Then build the missing field-backed ad-level checks (ad-name convention, ad status, FB Page, IG account, landing-page URL, display URL, tracking pixel, UTM) where the field exists and the rule is unambiguous.
+
+**Toward prod — once test + Kerri locked:**
+7. Prod-promotion dry run: walk `deploy/build_and_deploy_worker.sh prod` (re-tag tested digest, 2-step traffic shift); confirm prod uses `slack-bot-token` (shared `@qa-buddy`) + `qa-buddy-runs-social` queue. Do NOT promote until Kerri signs off + test fully validated (hard rule #1).
+8. Decide Firestore collection split (single indexed by `qa_app` vs separate) — low urgency.
 
 Deployed test worker URL: `https://qa-buddy-worker-social-test-637315940254.us-west1.run.app`. Manual re-run recipe: see the "Deployed test worker" section above.
 
