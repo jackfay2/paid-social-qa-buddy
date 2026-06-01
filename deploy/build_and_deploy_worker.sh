@@ -31,9 +31,16 @@ TS="${TS:-MANUAL-SET-TS}"
 
 if [[ "${ENVIRONMENT}" == "test" ]]; then
   SERVICE="qa-buddy-worker-social-test"
-  SLACK_SECRET="test-slack-bot-token"
+  # The worker posts the COMPLETION summary to the thread; it must post as OUR
+  # Social test bot (the same one the listener acks with = `social-test-slack-bot-token`),
+  # NOT Maya's `test-slack-bot-token`. Using hers makes the completion show up as
+  # "QA Buddy Bot Test" while the ack shows "Social QA Test" — two different bots
+  # in one thread, and our worker posting under her bot's identity. (Regression
+  # hit 2026-06-01.)
+  SLACK_SECRET="social-test-slack-bot-token"
 else
-  SERVICE="qa-buddy-worker-social"
+  # Prod is the ONE shared @qa-buddy app per Brad, so the prod worker uses the
+  # shared bot token.
   SLACK_SECRET="slack-bot-token"
 fi
 

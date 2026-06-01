@@ -161,7 +161,8 @@ Lock these three in a shared doc before either repo ships changes. They are the 
 - **Firestore collection (current):** `qa_runs` (single collection; Social split TBD — likely stay single, index by `platform`)
 - **Secret Manager secrets** (confirmed present 2026-05-28, Jack's ADC has list + version-access on this project):
   - `slack-bot-token`, `slack-signing-secret` — prod Slack workspace
-  - `test-slack-bot-token`, `test-slack-signing-secret` — **test** Slack workspace (use these for the test worker + `slack_smoke.py`)
+  - `test-slack-bot-token`, `test-slack-signing-secret` — **Maya's** test bot (`qa_buddy_bot_test`, `U0B3EJ7PZ5Z`). Do NOT point our Social worker at this — see next line.
+  - `social-test-slack-bot-token`, `social-test-slack-signing-secret` — **our** Social test app (`social_qa_test`, `U0B71RZQU4X`). **Both the test listener AND the test worker must use `social-test-slack-bot-token`** so the ack and the completion both post as "Social QA Test". (Regression 2026-06-01: the worker was deployed with `test-slack-bot-token`, so the completion posted as Maya's "QA Buddy Bot Test" while the ack was ours — fixed; deploy script's test branch now hardcodes `social-test-slack-bot-token`.)
   - `gemini-api-key`, `google-ads-*`, `qa-mcc-routes-json-{prod,test}` — Search-side, FYI
   - Pull a value without leaking it into logs: `SLACK_BOT_TOKEN=$(gcloud secrets versions access latest --secret=test-slack-bot-token --project=prj-prd-ai-ppc-qa-pkph) python scripts/slack_smoke.py --channel C…` (inline env var, never echoed).
 - **Test Slack bot:** bot user ID `U0B3EJ7PZ5Z` (Maya, 2026-05-28) — used by the listener to detect the `@qa-buddy` mention; not needed by the worker's outbound post.
