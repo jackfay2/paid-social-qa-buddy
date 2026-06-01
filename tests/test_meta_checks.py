@@ -10,9 +10,13 @@ from app.checks.meta_checks import (
     check_adset_age_max,
     check_adset_age_min,
     check_adset_attribution_setting,
+    check_adset_audience_exclusions,
+    check_adset_audiences,
     check_adset_conversion_event,
     check_adset_countries,
     check_adset_optimization_goal,
+    check_adset_spend_maximum,
+    check_adset_spend_minimum,
     check_adset_end_date,
     check_adset_genders,
     check_adset_start_date,
@@ -1175,6 +1179,110 @@ def test_optimization_goal_missing_is_review() -> None:
     assert result.verdict == "Review"
 
 
+# --- ad-set bidirectional presence checks (Brandon 2026-06-01) -------------
+
+
+def test_spend_minimum_yes_present_passes() -> None:
+    row = _row("adset_spend_minimum", "Yes")
+    result = check_adset_spend_minimum(
+        row, evidence=_adset_evidence([{"id": 1, "daily_min_spend_budget": 5000}])
+    )
+    assert result.verdict == "Pass"
+
+
+def test_spend_minimum_yes_but_absent_is_fix() -> None:
+    row = _row("adset_spend_minimum", "Yes")
+    result = check_adset_spend_minimum(
+        row,
+        evidence=_adset_evidence([{"id": 1, "name": "AS1", "daily_min_spend_budget": 0}]),
+    )
+    assert result.verdict == "Fix"
+    assert "AS1" in result.action
+
+
+def test_spend_minimum_no_and_absent_passes() -> None:
+    row = _row("adset_spend_minimum", "No")
+    result = check_adset_spend_minimum(
+        row, evidence=_adset_evidence([{"id": 1, "daily_min_spend_budget": 0}])
+    )
+    assert result.verdict == "Pass"
+
+
+def test_spend_minimum_no_but_present_is_review_accidental() -> None:
+    """The 'accidentally included' catch: builder said No, but a min IS set."""
+    row = _row("adset_spend_minimum", "No")
+    result = check_adset_spend_minimum(
+        row,
+        evidence=_adset_evidence([{"id": 1, "name": "AS1", "daily_min_spend_budget": 9000}]),
+    )
+    assert result.verdict == "Review"
+    assert "accidentally" in result.action.lower()
+
+
+def test_spend_minimum_blank_present_is_review() -> None:
+    """Blank builder input still checks for accidental inclusion (always-run)."""
+    row = _row("adset_spend_minimum", "")
+    result = check_adset_spend_minimum(
+        row, evidence=_adset_evidence([{"id": 1, "daily_min_spend_budget": 9000}])
+    )
+    assert result.verdict == "Review"
+
+
+def test_spend_maximum_yes_present_passes() -> None:
+    row = _row("adset_spend_maximum", "Yes")
+    result = check_adset_spend_maximum(
+        row, evidence=_adset_evidence([{"id": 1, "daily_spend_cap": 100000}])
+    )
+    assert result.verdict == "Pass"
+
+
+def test_audiences_yes_present_passes() -> None:
+    row = _row("adset_audiences", "Yes")
+    result = check_adset_audiences(
+        row,
+        evidence=_adset_evidence(
+            [{"id": 1, "targeting": {"custom_audiences": [{"id": "123"}]}}]
+        ),
+    )
+    assert result.verdict == "Pass"
+
+
+def test_audiences_yes_but_empty_is_fix() -> None:
+    row = _row("adset_audiences", "Yes")
+    result = check_adset_audiences(
+        row,
+        evidence=_adset_evidence([{"id": 1, "name": "AS1", "targeting": {"custom_audiences": []}}]),
+    )
+    assert result.verdict == "Fix"
+
+
+def test_exclusions_no_but_present_is_review() -> None:
+    row = _row("adset_audience_exclusions", "No")
+    result = check_adset_audience_exclusions(
+        row,
+        evidence=_adset_evidence(
+            [{"id": 1, "name": "AS1", "targeting": {"excluded_custom_audiences": [{"id": "9"}]}}]
+        ),
+    )
+    assert result.verdict == "Review"
+
+
+def test_presence_uninterpretable_input_is_review() -> None:
+    row = _row("adset_spend_minimum", "maybe")
+    result = check_adset_spend_minimum(
+        row, evidence=_adset_evidence([{"id": 1, "daily_min_spend_budget": 0}])
+    )
+    assert result.verdict == "Review"
+
+
+def test_presence_checks_always_run_on_blank_input() -> None:
+    """ALWAYS_RUN: a blank builder input must NOT short-circuit to N/A — the
+    check still runs (to catch accidental inclusion)."""
+    from app.core.pipeline import ALWAYS_RUN_CHECK_IDS
+    for cid in ("adset_spend_minimum", "adset_spend_maximum", "adset_audiences", "adset_audience_exclusions"):
+        assert cid in ALWAYS_RUN_CHECK_IDS
+
+
 # --- registry integration --------------------------------------------------
 
 
@@ -1195,6 +1303,10 @@ def test_checks_registered() -> None:
     assert "adset_conversion_event" in CHECK_REGISTRY
     assert "adset_attribution_setting" in CHECK_REGISTRY
     assert "adset_optimization_goal" in CHECK_REGISTRY
+    assert "adset_spend_minimum" in CHECK_REGISTRY
+    assert "adset_spend_maximum" in CHECK_REGISTRY
+    assert "adset_audiences" in CHECK_REGISTRY
+    assert "adset_audience_exclusions" in CHECK_REGISTRY
     # Ad checks
     assert "ad_status" in CHECK_REGISTRY
     assert "ad_count" in CHECK_REGISTRY

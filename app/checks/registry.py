@@ -19,11 +19,15 @@ from app.checks.meta_checks import (
     check_adset_age_max,
     check_adset_age_min,
     check_adset_attribution_setting,
+    check_adset_audience_exclusions,
+    check_adset_audiences,
     check_adset_conversion_event,
     check_adset_countries,
     check_adset_end_date,
     check_adset_genders,
     check_adset_optimization_goal,
+    check_adset_spend_maximum,
+    check_adset_spend_minimum,
     check_adset_start_date,
     check_adset_status,
     check_campaign_bid_strategy,
@@ -61,6 +65,13 @@ CHECK_REGISTRY: dict[str, CheckFunction] = {
     # (list of {event_type, window_days}) and optimization_goal (string enum).
     "adset_attribution_setting": check_adset_attribution_setting,
     "adset_optimization_goal": check_adset_optimization_goal,
+    # Bidirectional presence checks (Brandon 2026-06-01): builder Yes → must be
+    # present; even on No/blank, still verify it's NOT accidentally included.
+    # Always-run (see ALWAYS_RUN_CHECK_IDS in pipeline).
+    "adset_spend_minimum": check_adset_spend_minimum,
+    "adset_spend_maximum": check_adset_spend_maximum,
+    "adset_audiences": check_adset_audiences,
+    "adset_audience_exclusions": check_adset_audience_exclusions,
     # Ad level. Destination URL read defensively across several BQ schemas
     # (link_url, destination_url, creative.link_url, object_story_spec.link).
     "ad_status": check_ad_status,

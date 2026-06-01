@@ -1603,3 +1603,120 @@ def check_adset_optimization_goal(row: CheckRow, *, evidence: dict[str, Any] | N
             )
         return _pass(row, f"({len(missing)} of {len(ad_sets)} ad sets missing optimization goal)")
     return _pass(row)
+
+
+# === Ad-set level: bidirectional presence checks (Brandon calibration 2026-06-01) ==
+#
+# Spend Minimum / Spend Maximum / Interests-or-Custom-Audiences / Audience
+# Exclusions are "Yes/No" rows. Brandon's rule: builder "Yes" => the setting
+# must be PRESENT (Fix if absent); but EVEN WHEN the builder doesn't say Yes,
+# still check that it isn't there — to catch settings "accidentally included."
+# So these are bidirectional AND always-run (registered in ALWAYS_RUN_CHECK_IDS
+# so a blank builder input doesn't skip them). Unexpected-present => Review (it
+# may be intentional — escalate, don't false-Fix); expected-but-absent => Fix.
+# (Location is NOT here — per Brandon it's a value-match vs a builder-provided
+# location, which is `adset_countries`.)
+
+_AFFIRMATIVE = {"yes", "y", "true", "required", "needed", "applicable", "present"}
+_NEGATIVE = {"no", "n", "false", "na", "none", "not applicable", "n a", ""}
+
+
+def _expected_presence(value: Any) -> bool | None:
+    """True if the builder marked the setting expected (Yes), False if not
+    (No/blank/N/A), None if the input is uninterpretable (→ Review)."""
+    norm = _norm(value)
+    if norm in _AFFIRMATIVE:
+        return True
+    if norm in _NEGATIVE:
+        return False
+    return None
+
+
+def _adset_presence_check(
+    row: CheckRow,
+    *,
+    evidence: dict[str, Any] | None,
+    present_fn,
+    label: str,
+) -> CheckResult:
+    ad_sets = _ad_sets(evidence)
+    if not ad_sets:
+        return _review(row, "No ad sets found in BigQuery for this campaign.")
+
+    expected = _expected_presence(row.builder_input)
+    if expected is None:
+        return _review(
+            row,
+            f'Could not interpret "{row.builder_input}" for {label}; expected Yes/No. '
+            "Verify manually.",
+        )
+
+    missing_when_expected: list[str] = []   # builder said Yes, but absent → Fix
+    present_when_not: list[str] = []        # not expected, but present → Review
+
+    for adset in ad_sets:
+        actual_present = bool(present_fn(adset))
+        if expected and not actual_present:
+            missing_when_expected.append(_adset_label(adset))
+        elif not expected and actual_present:
+            present_when_not.append(_adset_label(adset))
+
+    if missing_when_expected:
+        first = missing_when_expected[0]
+        more = f" (+{len(missing_when_expected) - 1} more)" if len(missing_when_expected) > 1 else ""
+        return _fix(
+            row,
+            f"Builder expected {label}, but {first} has none{more}.",
+        )
+    if present_when_not:
+        first = present_when_not[0]
+        more = f" (+{len(present_when_not) - 1} more)" if len(present_when_not) > 1 else ""
+        return _review(
+            row,
+            f"{first} has {label} set but it wasn't marked expected{more} — "
+            "confirm it isn't accidentally included.",
+        )
+    return _pass(row)
+
+
+def _budget_present(adset: dict[str, Any], field: str) -> bool:
+    """A spend min/max is 'present' when the field holds a positive amount."""
+    val = _parse_int(adset.get(field))
+    return val is not None and val > 0
+
+
+def _targeting_list_present(adset: dict[str, Any], field: str) -> bool:
+    value = read_targeting(adset).get(field)
+    return isinstance(value, (list, tuple)) and len(value) > 0
+
+
+def check_adset_spend_minimum(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
+    return _adset_presence_check(
+        row, evidence=evidence,
+        present_fn=lambda a: _budget_present(a, "daily_min_spend_budget"),
+        label="a spend minimum",
+    )
+
+
+def check_adset_spend_maximum(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
+    return _adset_presence_check(
+        row, evidence=evidence,
+        present_fn=lambda a: _budget_present(a, "daily_spend_cap"),
+        label="a spend maximum",
+    )
+
+
+def check_adset_audiences(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
+    return _adset_presence_check(
+        row, evidence=evidence,
+        present_fn=lambda a: _targeting_list_present(a, "custom_audiences"),
+        label="interests/custom audiences",
+    )
+
+
+def check_adset_audience_exclusions(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
+    return _adset_presence_check(
+        row, evidence=evidence,
+        present_fn=lambda a: _targeting_list_present(a, "excluded_custom_audiences"),
+        label="audience exclusions",
+    )

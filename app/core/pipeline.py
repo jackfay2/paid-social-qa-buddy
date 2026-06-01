@@ -23,9 +23,18 @@ from app.models import CheckResult, CheckRow, RunSummary
 
 CheckRunner = Callable[..., CheckResult]
 
-# Checks that must run even when the builder leaves the input blank. None yet
-# for Social; the Search side uses this for its "downloaded_changes" check.
-ALWAYS_RUN_CHECK_IDS: frozenset[str] = frozenset()
+# Checks that must run even when the builder leaves the input blank. The
+# bidirectional presence checks (Brandon 2026-06-01) run even on blank/No input
+# so they can catch a setting that was "accidentally included" when none was
+# expected — a blank builder cell must NOT silently skip them.
+ALWAYS_RUN_CHECK_IDS: frozenset[str] = frozenset(
+    {
+        "adset_spend_minimum",
+        "adset_spend_maximum",
+        "adset_audiences",
+        "adset_audience_exclusions",
+    }
+)
 
 # Manual-by-design checks: always Review with a fixed instruction, never
 # auto-attempted (handoff hard rule #9). Checked before the blank/N-A gate, so
