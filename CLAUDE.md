@@ -112,6 +112,16 @@ The Social **test** path is live on Cloud Run — first real deploy:
 - **For the true `@-mention`:** only Gate 3 remains — Maya's listener routing (`qa_app=social` → `qa-buddy-runs-social[-test]` → our worker URL with OIDC). Every other leg is proven on real infra.
 - **To re-run the deployed worker manually:** post a Slack ack to get a `thread_ts`, then `gcloud tasks create-http-task --queue=qa-buddy-runs-social-test --url=<worker>/tasks/qa/run --oidc-service-account-email=ppc-qa-buddy@… --oidc-token-audience=<worker> --body-content='{envelope}'`. Worker URL: `https://qa-buddy-worker-social-test-637315940254.us-west1.run.app`.
 
+## Deployed test listener (2026-06-01)
+
+The merged search+social listener is deployed (idle until the Events-URL repoint):
+- **Service:** `qa-buddy-listener-social-test` (us-west1), **public** (`--allow-unauthenticated`, like any Slack webhook — protected at the app layer by signing-secret verification), runs as `ppc-qa-buddy@`. URL `https://qa-buddy-listener-social-test-637315940254.us-west1.run.app`.
+- **Events endpoint:** `POST /slack/events`. Verified: `/readyz`→200 (correct social config), unsigned `/slack/events`→401 (signing enforced). (`/healthz` returns a Google-edge 404 — a GFE reserved-path quirk, not our app; harmless.)
+- **Secrets:** `SLACK_SIGNING_SECRET`←`test-slack-signing-secret`, `SLACK_BOT_TOKEN`←`test-slack-bot-token`.
+- **Routing:** `SOCIAL_CHANNEL_IDS=C0B6ASW9R9V` → social queue → our worker. `SEARCH_WORKER_URL` deliberately **unset** so it can't reach Maya's workers (Search path inert until configured).
+- **Idle:** the test Slack app's Events URL still points at Maya's listener; nothing flows here until the repoint (Gate 3).
+- **⚠️ Repoint coordination:** when Maya repoints the Events URL here, *Search* @-mentions in the test workspace would also hit this listener → empty `SEARCH_WORKER_URL` → enqueue fails. So either repoint only while she's not Search-testing, OR set `SEARCH_WORKER_URL` (+ audience) to her *test* worker so Search keeps working through our copy (faithful merged-listener behavior; her test worker, not prod). Her call.
+
 ## Coordination contract with Maya
 
 Lock these three in a shared doc before either repo ships changes. They are the entire surface area between her code and ours:
