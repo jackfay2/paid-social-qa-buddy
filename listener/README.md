@@ -24,16 +24,20 @@ test service with the Social changes added; production listener stays unified").
   decision). This keeps **her enqueue service 100% unmodified** — no editing the
   3 `CloudTasksRequest` construction sites; the router infers right before
   enqueue. 10 tests in `tests/test_platform_router.py`.
-- ⬜ **Server entrypoint** — focused FastAPI app: `POST /slack/events` (verify
-  signing secret, url_verification challenge, 3s ack + background processing),
-  wiring two `CloudTasksQAQueue`s (search = `qa-buddy-runs` → her worker; social
-  = `qa-buddy-runs-social-test` → our worker URL + OIDC) into a `RoutingQAQueue`
-  with `social_channel_ids={C0B6ASW9R9V}`, injected into
-  `SlackCloudTasksEnqueueService(queue=router, run_store=…)`. Coupling to map:
-  her enqueue service needs a `run_store` (for dedupe/retry-window) — check
-  which methods it calls + back it with Firestore or in-memory for the test.
+- ✅ **Server entrypoint (2026-06-01)** — `app/api/server.py`: focused FastAPI
+  app, `POST /slack/events` (signing verify via vendored `app/api/slack_auth.py`,
+  url_verification challenge, dispatches to `handle_event` with a `say` that
+  posts via `SLACK_BOT_TOKEN`). Wires two `CloudTasksQAQueue`s → `RoutingQAQueue`
+  (social by `SOCIAL_CHANNEL_IDS`) → `SlackCloudTasksEnqueueService`. `run_store`
+  is a no-op stub — every run_store method is `getattr(...,None)` access, so
+  dedup/pending-confirmation just don't activate; the core enqueue path works.
+  15 listener tests (`cd listener && pytest`): health, readyz, challenge,
+  signing reject/accept, event dispatch. `Dockerfile` + `requirements.txt` added.
 - ⬜ Deploy as `qa-buddy-listener-social-test` (Cloud Run, reuse
-  `test-slack-bot-token` + `test-slack-signing-secret` from Secret Manager).
+  `test-slack-bot-token` + `test-slack-signing-secret` via `--set-secrets`).
+  Env to set: `SOCIAL_CHANNEL_IDS=C0B6ASW9R9V`, `SOCIAL_WORKER_URL=<worker>/tasks/qa/run`,
+  `SOCIAL_WORKER_AUDIENCE=<worker base url>`, `CLOUD_TASKS_SERVICE_ACCOUNT_EMAIL=ppc-qa-buddy@…`,
+  `SLACK_BOT_USER_ID=U0B3EJ7PZ5Z`.
 - ⬜ **Same-bot repoint (not a separate app):** point the existing test Slack
   app's Events URL at this listener (Maya/Slack admin). Our copy carries her full
   Search routing, so Search behaves identically — it just adds Social. One URL,

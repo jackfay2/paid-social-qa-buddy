@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+google-cloud-tasks
+requests
+httpx
+pytest
