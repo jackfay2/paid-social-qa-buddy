@@ -15,6 +15,7 @@ Shape taxonomy:
   F — single campaign + multi ads
 """
 
+import os
 import re
 from urllib.parse import urlparse
 
@@ -26,7 +27,16 @@ from app.listener.slack_models import (
 )
 
 _CUSTOMER_ID_PATTERN = re.compile(r"^\d{10}$")
+# SOCIAL ADDITION: Meta account IDs are ~15-17 digits, not Google's 10. For a
+# request from a configured social channel, accept the Meta length; Search
+# channels keep the strict 10-digit rule (byte-identical to Maya's).
+_SOCIAL_CUSTOMER_ID_PATTERN = re.compile(r"^\d{8,18}$")
 _CAMPAIGN_ID_PATTERN = re.compile(r"^\d+$")
+
+
+def _social_channel_ids() -> set[str]:
+    raw = os.environ.get("SOCIAL_CHANNEL_IDS", "")
+    return {c.strip() for c in raw.split(",") if c.strip()}
 _SHEETS_PATH_PATTERN = re.compile(r"^/spreadsheets/(?:u/\d+/)?d/[^/]+")
 _MENTION_PATTERN = re.compile(r"<@[^>]+>")
 _KEY_VALUE_SPLIT_PATTERN = re.compile(r"\s*[:=]\s*", re.IGNORECASE)
@@ -94,11 +104,18 @@ def parse_and_validate_slack_request(
         normalized_customer_id = ""
     else:
         normalized_customer_id = normalize_customer_id(customer_id_raw)
-        if not _CUSTOMER_ID_PATTERN.match(normalized_customer_id):
+        # SOCIAL ADDITION: relax to the Meta account-id length on social channels.
+        _is_social = channel_id in _social_channel_ids()
+        _pattern = _SOCIAL_CUSTOMER_ID_PATTERN if _is_social else _CUSTOMER_ID_PATTERN
+        if not _pattern.match(normalized_customer_id):
             errors.append(
                 SlackFieldError(
                     field="customer_id",
-                    reason="Customer ID is invalid. Use 10 digits (dashes optional).",
+                    reason=(
+                        "Account ID is invalid (expected a numeric Meta account id)."
+                        if _is_social
+                        else "Customer ID is invalid. Use 10 digits (dashes optional)."
+                    ),
                 )
             )
 
