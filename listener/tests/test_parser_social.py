@@ -49,3 +49,17 @@ def test_google_10_digit_still_accepted_on_search_channel(monkeypatch) -> None:
         thread_ts="1.2", user_id="U1",
     )
     assert result.accepted, result.errors
+
+
+def test_social_rejects_google_10_digit_and_too_short(monkeypatch) -> None:
+    """Audit #7: the social pattern must NOT over-accept — an 8-digit id or a
+    10-digit (Google-shaped) id on a social channel should be rejected, not
+    silently treated as a Meta account."""
+    monkeypatch.setenv("SOCIAL_CHANNEL_IDS", "C0B6ASW9R9V")
+    for bad in ("12345678", "1234567890"):  # 8-digit, 10-digit Google shape
+        result = parse_and_validate_slack_request(
+            text=_text(bad), channel_id="C0B6ASW9R9V",
+            thread_ts="1.2", user_id="U1",
+        )
+        assert not result.accepted, bad
+        assert any(e.field == "customer_id" for e in result.errors), bad

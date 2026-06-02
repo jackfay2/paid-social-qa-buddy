@@ -32,6 +32,29 @@ def test_skips_when_auth_not_required() -> None:
     verify_cloud_task_request({}, _settings(auth_required=False))
 
 
+def test_fail_closed_when_audience_unconfigured() -> None:
+    """Audit #3: auth_required but empty audience must REFUSE (empty audience
+    would make the verifier skip the audience check entirely)."""
+    s = TaskAuthSettings(auth_required=True, expected_audience="", expected_service_account_email=_SA)
+    with pytest.raises(TaskAuthError):
+        verify_cloud_task_request(
+            {"Authorization": "Bearer x"}, s, verifier=_verifier({"email_verified": True, "email": _SA})
+        )
+
+
+def test_fail_closed_when_sa_email_unconfigured() -> None:
+    """Audit #3: auth_required but empty expected SA email must REFUSE."""
+    s = TaskAuthSettings(
+        auth_required=True,
+        expected_audience="https://qa-buddy-worker-social.run.app/tasks/qa/run",
+        expected_service_account_email="",
+    )
+    with pytest.raises(TaskAuthError):
+        verify_cloud_task_request(
+            {"Authorization": "Bearer x"}, s, verifier=_verifier({"email_verified": True, "email": _SA})
+        )
+
+
 def test_missing_authorization_header_raises() -> None:
     with pytest.raises(TaskAuthError):
         verify_cloud_task_request({}, _settings())

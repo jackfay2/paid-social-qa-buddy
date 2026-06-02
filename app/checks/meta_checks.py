@@ -26,6 +26,7 @@ Value-map calibration:
 
 from __future__ import annotations
 
+import math
 import re
 from datetime import date, datetime
 from typing import Any
@@ -252,9 +253,12 @@ def _parse_money(value: Any) -> float | None:
     if not s:
         return None
     try:
-        return float(s)
+        parsed = float(s)
     except ValueError:
         return None
+    # float() accepts "nan"/"inf"/"infinity" without raising; reject non-finite
+    # so they become Review, not a bogus comparison → wrong Fix.
+    return parsed if math.isfinite(parsed) else None
 
 
 def check_campaign_budget(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
@@ -904,11 +908,18 @@ def _canonical_country(token: Any) -> str:
     text = str(token).strip()
     if not text:
         return ""
-    # Already a 2-letter code.
+    # Friendly-name / known-alias map FIRST. Some informal aliases map to a
+    # DIFFERENT alpha-2 code than their letters (e.g. "uk" -> "GB"); the 2-letter
+    # passthrough below would shadow those, wrong-Fixing a UK campaign that BQ
+    # correctly stores as "GB". Consulting the map first fixes that while leaving
+    # genuine codes (e.g. "ca" -> "CA") to pass through.
+    mapped = _COUNTRY_NAME_TO_CODE.get(_norm(text))
+    if mapped:
+        return mapped
+    # Otherwise an already-2-letter code passes through uppercased.
     if len(text) == 2 and text.isalpha():
         return text.upper()
-    # Try the friendly-name map (underscores/casing already normalized by _norm).
-    return _COUNTRY_NAME_TO_CODE.get(_norm(text), "")
+    return ""
 
 
 def _parse_country_set(value: Any) -> set[str] | None:
@@ -958,6 +969,11 @@ def check_adset_countries(row: CheckRow, *, evidence: dict[str, Any] | None = No
         actual = _parse_country_set(raw)
         if actual is None:
             unparseable.append((_adset_label(adset), str(raw)))
+            continue
+        if not actual:
+            # Empty targeting (e.g. countries == []) — we can't confirm the
+            # location; treat as missing → Review, never a wrong Fix.
+            missing.append(_adset_label(adset))
             continue
         if actual != expected:
             mismatched.append((_adset_label(adset), actual))

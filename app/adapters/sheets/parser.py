@@ -39,6 +39,16 @@ _OUTPUT_OPTIONAL_ALIASES = {
     "qa_initial": ["qa initial", "qa buddy initial", "qa buddy initials"],
 }
 
+# CANONICAL header: the bot needs ALL of these columns to do its job — read the
+# builder inputs AND write the verdicts. Read (parse_check_rows) and write
+# (detect_output_header_map) BOTH resolve the header from this same set, so they
+# always land on the SAME row. Detecting them separately (input-only vs
+# output-only) let a preamble/banner row that matches just one side split the
+# two detections, sending verdicts to the wrong cells with no error (silent
+# corruption). Requiring all four anchors both to the one true header row.
+_REQUIRED_ALIASES = {**_INPUT_REQUIRED_ALIASES, **_OUTPUT_REQUIRED_ALIASES}
+_OPTIONAL_ALIASES = {**_INPUT_OPTIONAL_ALIASES, **_OUTPUT_OPTIONAL_ALIASES}
+
 
 class SheetTemplateError(Exception):
     """Raised when the sheet doesn't contain the expected header columns."""
@@ -114,7 +124,7 @@ def parse_check_rows(table_rows: list[list[str]]) -> list[CheckRow]:
         raise SheetTemplateError("sheet_template_invalid", "Sheet is empty.")
 
     header_idx, headers = _detect_header_map(
-        table_rows, _INPUT_REQUIRED_ALIASES, _INPUT_OPTIONAL_ALIASES
+        table_rows, _REQUIRED_ALIASES, _OPTIONAL_ALIASES
     )
 
     rows: list[CheckRow] = []
@@ -152,6 +162,6 @@ def detect_output_header_map(table_rows: list[list[str]]) -> tuple[int, dict[str
     """
     if not table_rows:
         raise SheetTemplateError("sheet_template_invalid", "Sheet is empty.")
-    return _detect_header_map(
-        table_rows, _OUTPUT_REQUIRED_ALIASES, _OUTPUT_OPTIONAL_ALIASES
-    )
+    # Same canonical detection as the read path, so write columns and read
+    # row_index always come from the identical header row (see _REQUIRED_ALIASES).
+    return _detect_header_map(table_rows, _REQUIRED_ALIASES, _OPTIONAL_ALIASES)

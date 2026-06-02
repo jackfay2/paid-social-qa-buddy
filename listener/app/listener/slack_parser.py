@@ -30,7 +30,10 @@ _CUSTOMER_ID_PATTERN = re.compile(r"^\d{10}$")
 # SOCIAL ADDITION: Meta account IDs are ~15-17 digits, not Google's 10. For a
 # request from a configured social channel, accept the Meta length; Search
 # channels keep the strict 10-digit rule (byte-identical to Maya's).
-_SOCIAL_CUSTOMER_ID_PATTERN = re.compile(r"^\d{8,18}$")
+# Lower bound is 11 (not 8) so we DON'T accept implausibly short ids and, more
+# importantly, don't overlap Google's exact 10-digit shape — a Google customer_id
+# pasted in a social channel should be rejected, not silently treated as a Meta id.
+_SOCIAL_CUSTOMER_ID_PATTERN = re.compile(r"^\d{11,18}$")
 _CAMPAIGN_ID_PATTERN = re.compile(r"^\d+$")
 
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 
 class SocialTaskRequest(BaseModel):
@@ -14,6 +14,15 @@ class SocialTaskRequest(BaseModel):
     """
 
     model_config = ConfigDict(coerce_numbers_to_str=True, populate_by_name=True)
+
+    @field_validator("*", mode="before")
+    @classmethod
+    def _none_to_empty(cls, value: object) -> object:
+        """A JSON null for any string field would otherwise 422 at validation
+        (before the handler runs), bypassing the graceful "missing field" reject
+        that posts a user-visible message to Slack. Collapse null → "" so a null
+        id flows into that same reject path instead of a silent 422."""
+        return "" if value is None else value
 
     request_id: str = ""
     channel_id: str = ""

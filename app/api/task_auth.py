@@ -42,6 +42,23 @@ def verify_cloud_task_request(
     if not settings.auth_required:
         return
 
+    # Fail-closed: when auth IS required, the audience AND the service-account
+    # email MUST be configured. If either is empty, the checks below silently
+    # degrade — passing audience=None tells the verifier to SKIP audience
+    # verification, and an empty expected email skips the SA check — so the
+    # worker would accept any validly-signed Google OIDC token. Refuse rather
+    # than under-verify (defense-in-depth for a misconfigured deploy).
+    if not settings.expected_audience:
+        raise TaskAuthError(
+            "auth_required is set but no OIDC audience is configured; refusing to "
+            "verify (would accept any Google-signed token)."
+        )
+    if not settings.expected_service_account_email:
+        raise TaskAuthError(
+            "auth_required is set but no expected service-account email is "
+            "configured; refusing to verify."
+        )
+
     auth_header = headers.get("Authorization") or headers.get("authorization") or ""
     if not auth_header.startswith("Bearer "):
         raise TaskAuthError("Missing or malformed Authorization header.")

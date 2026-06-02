@@ -136,6 +136,32 @@ def test_numeric_account_id_coerced_to_string(monkeypatch) -> None:
     assert captured["account_id"] == "123456789"
 
 
+def test_json_null_field_coerced_not_422(monkeypatch) -> None:
+    """Audit #6: a JSON null in a string field must NOT 422 (which would bypass
+    the graceful 'missing field' reject + Slack notice). It collapses to '' and
+    flows through the normal path."""
+    captured = {}
+
+    def fake_build(settings):
+        service = MagicMock()
+        service.run_store = MagicMock()
+
+        def _run(req):
+            captured["account_id"] = req.account_id
+            return _completed_result()
+
+        service.run.side_effect = _run
+        return service
+
+    monkeypatch.setattr(wiring, "build_orchestration_service", fake_build)
+    monkeypatch.setattr(wiring, "build_slack_client", lambda s: None)
+
+    payload = {**_PAYLOAD, "account_id": None}  # JSON null
+    response = _client().post("/tasks/qa/run", json=payload)
+    assert response.status_code == 200  # not 422
+    assert captured["account_id"] == ""
+
+
 # --- Slack behavior --------------------------------------------------------
 
 

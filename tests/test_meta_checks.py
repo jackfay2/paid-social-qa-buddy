@@ -213,6 +213,17 @@ def test_budget_unparseable_is_review() -> None:
     assert result.verdict == "Review"
 
 
+def test_budget_non_finite_input_is_review() -> None:
+    """Audit #5: float() accepts 'nan'/'inf' without raising; those must become
+    Review, not a bogus comparison → wrong Fix."""
+    for bad in ("nan", "inf", "-inf", "Infinity"):
+        row = _row("campaign_budget", bad)
+        result = check_campaign_budget(
+            row, evidence=_evidence({"daily_budget": 200000, "lifetime_budget": 0})
+        )
+        assert result.verdict == "Review", bad
+
+
 def test_budget_no_campaign_level_budget_is_review() -> None:
     """Both daily and lifetime are 0 → budget is at the ad-set level (CBO off)."""
     row = _row("campaign_budget", "$2,000")
@@ -676,6 +687,35 @@ def test_adset_countries_all_missing_is_review() -> None:
     row = _row("adset_countries", "US")
     result = check_adset_countries(
         row, evidence=_adset_evidence([{"id": 1, "targeting": {}}])
+    )
+    assert result.verdict == "Review"
+
+
+def test_adset_countries_uk_alias_matches_gb() -> None:
+    """Audit #1: builder types informal 'UK'; Meta/BQ stores 'GB'. Must Pass,
+    not wrong-Fix (the 2-letter passthrough used to shadow the uk->GB alias)."""
+    row = _row("adset_countries", "UK")
+    result = check_adset_countries(
+        row, evidence=_adset_evidence([{"id": 1, "targeting": {"countries": ["GB"]}}])
+    )
+    assert result.verdict == "Pass"
+
+
+def test_adset_countries_unrelated_two_letter_still_passes_through() -> None:
+    """Guard: a genuine 2-letter code not in the alias map still works."""
+    row = _row("adset_countries", "CA")
+    result = check_adset_countries(
+        row, evidence=_adset_evidence([{"id": 1, "targeting": {"countries": ["CA"]}}])
+    )
+    assert result.verdict == "Pass"
+
+
+def test_adset_countries_empty_list_is_review_not_fix() -> None:
+    """Audit #4: an empty countries list ([]) means we can't confirm the
+    location → Review, never a wrong Fix."""
+    row = _row("adset_countries", "US")
+    result = check_adset_countries(
+        row, evidence=_adset_evidence([{"id": 1, "targeting": {"countries": []}}])
     )
     assert result.verdict == "Review"
 

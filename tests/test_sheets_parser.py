@@ -142,6 +142,29 @@ def test_detect_output_header_map_finds_optional_qa_initial() -> None:
     assert header_map["qa_initial"] == 8
 
 
+def test_read_and_write_resolve_same_header_despite_banner_row() -> None:
+    """Audit #2: a banner row that matches the OUTPUT columns but not the INPUT
+    columns must NOT split read vs write onto different header rows (which would
+    write verdicts to the wrong cells). Both paths must anchor to the one true
+    header row that has ALL four columns."""
+    # A "Pass or Fix / Action" legend banner ABOVE the real header.
+    banner = ["Legend", "", "", "", "", "", "Pass or Fix", "Action"]
+    table = [
+        banner,
+        _HEADER,
+        ["bid_strategy", "", "", "Bid Strategy", "Lowest cost", "", "", ""],
+    ]
+    read_rows = parse_check_rows(table)
+    write_header_idx, write_map = detect_output_header_map(table)
+
+    # Real header is row index 1; the banner (idx 0) must be ignored by both.
+    assert write_header_idx == 1
+    assert write_map["pass_or_fix"] == 6 and write_map["action"] == 7
+    # The data row's 1-based index (2 rows above it: banner + header) is 3,
+    # and the writer's header sits at idx 1 — consistent, no divergence.
+    assert read_rows[0].row_index == 3
+
+
 def test_detect_output_header_map_raises_when_missing_required() -> None:
     bad_header = ["Check_ID", "Builder Input", "Builder Notes"]  # no Pass or Fix / Action
     with pytest.raises(SheetTemplateError):
