@@ -56,6 +56,17 @@ ALWAYS_REVIEW_CHECK_ACTIONS: dict[str, str] = {
         "Manual check: verify the 1x1 and 9x16 creative are present and correct "
         "in Ads Manager."
     ),
+    # Naming conventions are MANUAL by Kerri's call (2026-06-02): conventions
+    # vary slightly by account/client, so a single auto rule would be too
+    # brittle — the bot flags for a human instead of guessing.
+    "adset_name_conventions": (
+        "Manual check: confirm the ad set name follows this client's naming "
+        "convention (varies by account — verify in Ads Manager)."
+    ),
+    "ad_name_conventions": (
+        "Manual check: confirm the ad name follows this client's naming "
+        "convention (varies by account — verify in Ads Manager)."
+    ),
 }
 
 

@@ -117,6 +117,17 @@ def test_ad_creative_dimensions_is_manual_review() -> None:
     assert "1x1" in results[0].action and "9x16" in results[0].action
 
 
+def test_name_convention_checks_are_manual_review() -> None:
+    """Kerri's call (2026-06-02): naming conventions vary by client, so the
+    ad-set and ad name checks are MANUAL — always Review with instructions,
+    never an auto-guess, even when the builder filled in 'Yes'."""
+    for check_id in ("adset_name_conventions", "ad_name_conventions"):
+        rows = [_row(check_id, builder_input="Yes")]
+        results = execute_checks(rows, _passing_runner)
+        assert results[0].verdict == "Review", check_id
+        assert "naming convention" in results[0].action.lower(), check_id
+
+
 def test_execute_checks_force_run_overrides_na(monkeypatch) -> None:
     """A force-run check runs even with blank input."""
     rows = [_row("always_run_check", builder_input="")]
