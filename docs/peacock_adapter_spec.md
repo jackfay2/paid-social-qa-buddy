@@ -83,7 +83,21 @@ The unified table carries rich trafficking metadata: `Offer_Name`, `Offer_Price`
 - **Phase 2:** vocabulary calibration maps (objective, buy_type, CTA, status — from a full `DISTINCT` scan + Kerri) and the 🔶 date check.
 - **Phase 3:** Peacock-specific Offer/Show/Format checks (§6), if Kerri wants them.
 
-## 9. Notes / caveats
+## 9.5 POC validation (2026-06-02) — approach proven on real data
+
+Ran the **real** check pipeline against a live Peacock Meta campaign (`120215246378710260`, 30 creatives) by reading `nbc-287716`, dedup'ing to `evidence`, and calling the existing checks + Gemini. Results:
+
+- ✅ **Read → dedup → evidence → checks works end-to-end.** Nothing structural broke.
+- ✅ **`ad_copy_spelling` (Gemini on `FinalCopy`) → Pass** on real Peacock copy — the highest-value check works.
+- ✅ **`ad_call_to_action` → Pass** (`"Sign Up"` mapped fine), **`ad_status` runs** (`Live`/`Paused`).
+- ✅ **Unsupported checks self-disable to Review** (`campaign_bid_strategy`, `adset_age_min` → "not available") — the core safety claim, proven on real data.
+- 🔶 **`campaign_objective` → Review** "could not interpret 'Acquisition'" — confirms the **Peacock objective vocab map** is the main calibration item. Full vocab (verified): Objective = `Acquisition / Awareness / Engagement / Other`; CTABundle = `Learn More / Sign Up / Watch More`; Buy_Type = `Biddable`; Creative_Status = `Live / Paused`.
+- 🆕 **`FinalCopy` is structured** `"Headline: … \nBody: …"` — so we can **split it into headline + body** and run *both* `ad_headline_spelling` and `ad_copy_spelling`, not just one combined copy check.
+- 🔶 **Landing-URL check**: builder must enter the **full URL** (the check is exact-match), or we add domain-only matching — decide with Kerri.
+
+Net: the spec's approach is validated; remaining work is the calibration maps + the FinalCopy split, not anything structural.
+
+## 10. Notes / caveats
 
 - **Daily-stale:** like the standard sync, this table is daily — and Kerri's *exact* demo campaign `120249542911530260` wasn't in it yet at spec time (too new / id not yet landed), though peers with the same `120…0260` format are. Confirm freshness expectations.
 - **Cost:** the table is large + multi-platform; always filter `Platform='Meta'` + `Campaign_ID` (+ a `Date` window) so queries scan narrowly. Cache per run like the standard adapter.
