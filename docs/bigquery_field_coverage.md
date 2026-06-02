@@ -62,11 +62,14 @@ code change needed beyond wiring.
 > important one to make deterministic — push `promoted_object` to the top of the
 > Riley/Nikki request.
 
-## Buildable now, but needs one product answer
-- **`campaign_budget`** — `campaigns.daily_budget` / `lifetime_budget` are synced
-  (BQ stores **minor units**, e.g. `200000` = $2,000.00). Blocked only on: *what
-  format do builders type the budget in?* (dollars? `$2,000`? cents?) — a
-  Kerri/Carrie/template decision, not a data gap.
+## `campaign_budget` — BUILT defensively (2026-06-02)
+`campaigns.daily_budget` / `lifetime_budget` are synced (BQ stores **minor
+units**, e.g. `200000` = $2,000.00). Built without waiting on the input-format
+decision: it **assumes dollars** and says so in the action; if the builder's
+number instead equals the raw cents value it returns **Review** (units
+ambiguity, never a wrong Fix); unparseable → Review; both/neither budget set →
+Review. Kerri's format answer just *confirms* the dollars assumption rather than
+gating the build. Daily vs lifetime auto-detected (the unused one is 0).
 
 ## The ask for Riley + Nikki (one line)
 > Please sync these Meta Marketing API fields into the `facebook_ads__*` tables:

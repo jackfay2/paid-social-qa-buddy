@@ -31,6 +31,7 @@ from app.checks.meta_checks import (
     check_adset_start_date,
     check_adset_status,
     check_campaign_bid_strategy,
+    check_campaign_budget,
     check_campaign_buying_type,
     check_campaign_objective,
     check_campaign_start_date,
@@ -49,6 +50,7 @@ CHECK_REGISTRY: dict[str, CheckFunction] = {
     "campaign_status": check_campaign_status,
     "campaign_start_date": check_campaign_start_date,
     "campaign_bid_strategy": check_campaign_bid_strategy,
+    "campaign_budget": check_campaign_budget,
     # Ad set level. Targeting fields (age_*, genders, countries) read via
     # _targeting.read_targeting so nested vs flat schemas both work.
     "adset_status": check_adset_status,

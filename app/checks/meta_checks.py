@@ -239,6 +239,85 @@ def check_campaign_buying_type(row: CheckRow, *, evidence: dict[str, Any] | None
     return _fix(row, f'Expected "{row.builder_input}", got "{actual}"')
 
 
+# --- campaign_budget -------------------------------------------------------
+
+
+def _parse_money(value: Any) -> float | None:
+    """Parse a builder-entered budget into dollars. Strips $, commas, and a
+    trailing 'usd'. Returns None on anything it can't read cleanly (caller →
+    Review, never a wrong guess)."""
+    if value is None:
+        return None
+    s = str(value).strip().lower().replace("$", "").replace(",", "").replace("usd", "").strip()
+    if not s:
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def check_campaign_budget(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
+    """Compare the builder's expected campaign budget to BigQuery.
+
+    BigQuery stores budgets in MINOR units (cents): daily_budget=200000 → $2,000.
+    A campaign normally has either a daily OR a lifetime budget (the other is 0);
+    when both are 0 the budget is set per ad set (CBO off) → Review.
+
+    Defensive by design (input format pending Kerri): we ASSUME the builder types
+    dollars and disclose that in the action. If their number instead matches the
+    raw cents value, that's a units ambiguity → Review (not a wrong Fix). Anything
+    unparseable → Review. So this is safe regardless of the final format decision.
+    """
+    campaign = _campaign(evidence)
+    daily = _parse_int(campaign.get("daily_budget"))
+    lifetime = _parse_int(campaign.get("lifetime_budget"))
+
+    if daily is None and lifetime is None:
+        return _review(row, "Campaign budget not available in BigQuery; verify manually.")
+
+    daily_set = bool(daily and daily > 0)
+    lifetime_set = bool(lifetime and lifetime > 0)
+    if not daily_set and not lifetime_set:
+        return _review(
+            row,
+            "No campaign-level budget is set (it may be set per ad set / CBO off); "
+            "verify manually.",
+        )
+    if daily_set and lifetime_set:
+        return _review(
+            row, "Both a daily and a lifetime campaign budget are set; verify manually."
+        )
+
+    budget_minor = daily if daily_set else lifetime
+    kind = "daily" if daily_set else "lifetime"
+    budget_dollars = budget_minor / 100.0
+
+    expected = _parse_money(row.builder_input)
+    if expected is None:
+        return _review(
+            row,
+            f'Could not interpret the expected budget "{row.builder_input}". '
+            f"Actual {kind} budget is ${budget_dollars:,.2f}. Verify manually.",
+        )
+
+    if abs(expected - budget_dollars) <= 0.01:
+        return _pass(row, f"{kind.capitalize()} budget ${budget_dollars:,.2f} matches.")
+    # Units guard: their number matches the raw cents value → likely a
+    # dollars-vs-cents convention difference, not a real mismatch → Review.
+    if abs(expected - budget_minor) <= 0.01:
+        return _review(
+            row,
+            f'Expected "{row.builder_input}" equals the raw cents value; the {kind} '
+            f"budget is ${budget_dollars:,.2f}. Confirm budgets are entered in dollars.",
+        )
+    return _fix(
+        row,
+        f"Expected ${expected:,.2f}, but the {kind} budget is ${budget_dollars:,.2f} "
+        "(compared as dollars — BigQuery stores minor units).",
+    )
+
+
 # --- campaign_status -------------------------------------------------------
 
 # Known Meta status enums (effective_status / status fields).

@@ -22,6 +22,7 @@ from app.checks.meta_checks import (
     check_adset_start_date,
     check_adset_status,
     check_campaign_bid_strategy,
+    check_campaign_budget,
     check_campaign_buying_type,
     check_campaign_objective,
     check_campaign_start_date,
@@ -166,6 +167,70 @@ def test_buying_type_reservation_vs_auction_is_fix() -> None:
     row = _row("campaign_buying_type", "Reservation")
     result = check_campaign_buying_type(row, evidence=_evidence({"buying_type": "AUCTION"}))
     assert result.verdict == "Fix"
+
+
+# --- campaign_budget -------------------------------------------------------
+# BigQuery stores budgets in minor units (cents): daily_budget=200000 → $2,000.
+
+
+def test_budget_daily_match_passes() -> None:
+    row = _row("campaign_budget", "$2,000")
+    result = check_campaign_budget(row, evidence=_evidence({"daily_budget": 200000, "lifetime_budget": 0}))
+    assert result.verdict == "Pass"
+
+
+def test_budget_plain_number_dollars_passes() -> None:
+    row = _row("campaign_budget", "10")
+    result = check_campaign_budget(row, evidence=_evidence({"daily_budget": 1000, "lifetime_budget": 0}))
+    assert result.verdict == "Pass"  # 1000 cents = $10.00
+
+
+def test_budget_lifetime_match_passes() -> None:
+    row = _row("campaign_budget", "330")
+    result = check_campaign_budget(row, evidence=_evidence({"daily_budget": 0, "lifetime_budget": 33000}))
+    assert result.verdict == "Pass"
+
+
+def test_budget_real_mismatch_is_fix() -> None:
+    row = _row("campaign_budget", "$500")
+    result = check_campaign_budget(row, evidence=_evidence({"daily_budget": 200000, "lifetime_budget": 0}))
+    assert result.verdict == "Fix"
+    assert "2,000.00" in result.action and "500" in result.action
+
+
+def test_budget_cents_convention_is_review_not_fix() -> None:
+    """If the builder's number equals the raw cents value, it's a dollars-vs-cents
+    ambiguity — Review, never a wrong Fix (defensive until Kerri confirms format)."""
+    row = _row("campaign_budget", "200000")
+    result = check_campaign_budget(row, evidence=_evidence({"daily_budget": 200000, "lifetime_budget": 0}))
+    assert result.verdict == "Review"
+    assert "dollars" in result.action.lower()
+
+
+def test_budget_unparseable_is_review() -> None:
+    row = _row("campaign_budget", "two grand")
+    result = check_campaign_budget(row, evidence=_evidence({"daily_budget": 200000, "lifetime_budget": 0}))
+    assert result.verdict == "Review"
+
+
+def test_budget_no_campaign_level_budget_is_review() -> None:
+    """Both daily and lifetime are 0 → budget is at the ad-set level (CBO off)."""
+    row = _row("campaign_budget", "$2,000")
+    result = check_campaign_budget(row, evidence=_evidence({"daily_budget": 0, "lifetime_budget": 0}))
+    assert result.verdict == "Review"
+    assert "ad set" in result.action.lower()
+
+
+def test_budget_field_absent_is_review() -> None:
+    row = _row("campaign_budget", "$2,000")
+    result = check_campaign_budget(row, evidence=_evidence({}))
+    assert result.verdict == "Review"
+
+
+def test_budget_both_set_is_review() -> None:
+    row = _row("campaign_budget", "$2,000")
+    result = check_campaign_budget(row, evidence=_evidence({"daily_budget": 200000, "lifetime_budget": 50000}))
+    assert result.verdict == "Review"
 
 
 # --- campaign_status -------------------------------------------------------
