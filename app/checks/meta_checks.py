@@ -1638,7 +1638,20 @@ def _adset_presence_check(
     evidence: dict[str, Any] | None,
     present_fn,
     label: str,
+    verifiable_fn=None,
 ) -> CheckResult:
+    """Bidirectional presence check over a campaign's ad sets.
+
+    present_fn(adset)    -> is the setting present (a positive amount, a non-empty
+                            list, …)?
+    verifiable_fn(adset) -> is the underlying field even SYNCED to BigQuery for
+                            this ad set (regardless of value)? Defaults to "always
+                            verifiable". When a field isn't synced (e.g. some
+                            clients don't have `custom_audiences`), present_fn
+                            would read absent-as-"none" and a builder "Yes" would
+                            FALSELY Fix. So an unverifiable field → Review ("can't
+                            confirm"), never Fix (Peacock rule: never a wrong flag).
+    """
     ad_sets = _ad_sets(evidence)
     if not ad_sets:
         return _review(row, "No ad sets found in BigQuery for this campaign.")
@@ -1651,22 +1664,36 @@ def _adset_presence_check(
             "Verify manually.",
         )
 
-    missing_when_expected: list[str] = []   # builder said Yes, but absent → Fix
+    verify = verifiable_fn or (lambda _adset: True)
+    missing_when_expected: list[str] = []   # builder said Yes, verifiably absent → Fix
+    unverifiable: list[str] = []            # field not synced to BQ → can't confirm → Review
     present_when_not: list[str] = []        # not expected, but present → Review
 
     for adset in ad_sets:
+        if not verify(adset):
+            unverifiable.append(_adset_label(adset))
+            continue
         actual_present = bool(present_fn(adset))
         if expected and not actual_present:
             missing_when_expected.append(_adset_label(adset))
         elif not expected and actual_present:
             present_when_not.append(_adset_label(adset))
 
+    # A verifiable, genuine miss is a real Fix and outranks everything.
     if missing_when_expected:
         first = missing_when_expected[0]
         more = f" (+{len(missing_when_expected) - 1} more)" if len(missing_when_expected) > 1 else ""
         return _fix(
             row,
             f"Builder expected {label}, but {first} has none{more}.",
+        )
+    # Field isn't in BigQuery → we can't confirm either way → Review, never Fix.
+    if unverifiable:
+        first = unverifiable[0]
+        more = f" (+{len(unverifiable) - 1} more)" if len(unverifiable) > 1 else ""
+        return _review(
+            row,
+            f"{label} isn't available in BigQuery for {first}{more}; verify manually.",
         )
     if present_when_not:
         first = present_when_not[0]
@@ -1685,15 +1712,28 @@ def _budget_present(adset: dict[str, Any], field: str) -> bool:
     return val is not None and val > 0
 
 
+def _budget_synced(adset: dict[str, Any], field: str) -> bool:
+    """Is the budget column synced for this ad set (present, even if 0)? A missing
+    column reads as None → we can't tell 'no minimum' from 'not synced'."""
+    return adset.get(field) is not None
+
+
 def _targeting_list_present(adset: dict[str, Any], field: str) -> bool:
     value = read_targeting(adset).get(field)
     return isinstance(value, (list, tuple)) and len(value) > 0
+
+
+def _targeting_synced(adset: dict[str, Any], field: str) -> bool:
+    """Is the targeting field synced at all (key present, even if empty list)?
+    Some clients don't sync `custom_audiences` — absent ≠ 'no audiences'."""
+    return field in read_targeting(adset)
 
 
 def check_adset_spend_minimum(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
     return _adset_presence_check(
         row, evidence=evidence,
         present_fn=lambda a: _budget_present(a, "daily_min_spend_target"),
+        verifiable_fn=lambda a: _budget_synced(a, "daily_min_spend_target"),
         label="a spend minimum",
     )
 
@@ -1702,6 +1742,7 @@ def check_adset_spend_maximum(row: CheckRow, *, evidence: dict[str, Any] | None 
     return _adset_presence_check(
         row, evidence=evidence,
         present_fn=lambda a: _budget_present(a, "daily_spend_cap"),
+        verifiable_fn=lambda a: _budget_synced(a, "daily_spend_cap"),
         label="a spend maximum",
     )
 
@@ -1710,6 +1751,7 @@ def check_adset_audiences(row: CheckRow, *, evidence: dict[str, Any] | None = No
     return _adset_presence_check(
         row, evidence=evidence,
         present_fn=lambda a: _targeting_list_present(a, "custom_audiences"),
+        verifiable_fn=lambda a: _targeting_synced(a, "custom_audiences"),
         label="interests/custom audiences",
     )
 
@@ -1718,5 +1760,6 @@ def check_adset_audience_exclusions(row: CheckRow, *, evidence: dict[str, Any] |
     return _adset_presence_check(
         row, evidence=evidence,
         present_fn=lambda a: _targeting_list_present(a, "excluded_custom_audiences"),
+        verifiable_fn=lambda a: _targeting_synced(a, "excluded_custom_audiences"),
         label="audience exclusions",
     )

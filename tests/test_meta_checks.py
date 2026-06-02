@@ -1256,6 +1256,32 @@ def test_audiences_yes_but_empty_is_fix() -> None:
     assert result.verdict == "Fix"
 
 
+def test_audiences_yes_but_field_not_synced_is_review_not_fix() -> None:
+    """custom_audiences isn't synced for every client (e.g. C61854560). With the
+    field absent, a builder 'Yes' must NOT falsely Fix — we can't verify, so
+    Review (Peacock rule: never a wrong flag)."""
+    row = _row("adset_audiences", "Yes")
+    result = check_adset_audiences(
+        row,
+        evidence=_adset_evidence(
+            [{"id": 1, "name": "AS1", "targeting": {"age_min": 25, "countries": ["US"]}}]
+        ),
+    )
+    assert result.verdict == "Review"
+    assert "bigquery" in result.action.lower()
+
+
+def test_spend_minimum_field_not_synced_is_review_not_fix() -> None:
+    """If daily_min_spend_target isn't synced (column absent), 'Yes' → Review,
+    not a false Fix."""
+    row = _row("adset_spend_minimum", "Yes")
+    result = check_adset_spend_minimum(
+        row, evidence=_adset_evidence([{"id": 1, "name": "AS1", "daily_spend_cap": 0}])
+    )
+    assert result.verdict == "Review"
+    assert "bigquery" in result.action.lower()
+
+
 def test_exclusions_no_but_present_is_review() -> None:
     row = _row("adset_audience_exclusions", "No")
     result = check_adset_audience_exclusions(
