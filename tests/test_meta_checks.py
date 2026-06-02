@@ -1185,7 +1185,7 @@ def test_optimization_goal_missing_is_review() -> None:
 def test_spend_minimum_yes_present_passes() -> None:
     row = _row("adset_spend_minimum", "Yes")
     result = check_adset_spend_minimum(
-        row, evidence=_adset_evidence([{"id": 1, "daily_min_spend_budget": 5000}])
+        row, evidence=_adset_evidence([{"id": 1, "daily_min_spend_target": 5000}])
     )
     assert result.verdict == "Pass"
 
@@ -1194,7 +1194,7 @@ def test_spend_minimum_yes_but_absent_is_fix() -> None:
     row = _row("adset_spend_minimum", "Yes")
     result = check_adset_spend_minimum(
         row,
-        evidence=_adset_evidence([{"id": 1, "name": "AS1", "daily_min_spend_budget": 0}]),
+        evidence=_adset_evidence([{"id": 1, "name": "AS1", "daily_min_spend_target": 0}]),
     )
     assert result.verdict == "Fix"
     assert "AS1" in result.action
@@ -1203,7 +1203,7 @@ def test_spend_minimum_yes_but_absent_is_fix() -> None:
 def test_spend_minimum_no_and_absent_passes() -> None:
     row = _row("adset_spend_minimum", "No")
     result = check_adset_spend_minimum(
-        row, evidence=_adset_evidence([{"id": 1, "daily_min_spend_budget": 0}])
+        row, evidence=_adset_evidence([{"id": 1, "daily_min_spend_target": 0}])
     )
     assert result.verdict == "Pass"
 
@@ -1213,7 +1213,7 @@ def test_spend_minimum_no_but_present_is_review_accidental() -> None:
     row = _row("adset_spend_minimum", "No")
     result = check_adset_spend_minimum(
         row,
-        evidence=_adset_evidence([{"id": 1, "name": "AS1", "daily_min_spend_budget": 9000}]),
+        evidence=_adset_evidence([{"id": 1, "name": "AS1", "daily_min_spend_target": 9000}]),
     )
     assert result.verdict == "Review"
     assert "accidentally" in result.action.lower()
@@ -1223,7 +1223,7 @@ def test_spend_minimum_blank_present_is_review() -> None:
     """Blank builder input still checks for accidental inclusion (always-run)."""
     row = _row("adset_spend_minimum", "")
     result = check_adset_spend_minimum(
-        row, evidence=_adset_evidence([{"id": 1, "daily_min_spend_budget": 9000}])
+        row, evidence=_adset_evidence([{"id": 1, "daily_min_spend_target": 9000}])
     )
     assert result.verdict == "Review"
 
@@ -1270,7 +1270,7 @@ def test_exclusions_no_but_present_is_review() -> None:
 def test_presence_uninterpretable_input_is_review() -> None:
     row = _row("adset_spend_minimum", "maybe")
     result = check_adset_spend_minimum(
-        row, evidence=_adset_evidence([{"id": 1, "daily_min_spend_budget": 0}])
+        row, evidence=_adset_evidence([{"id": 1, "daily_min_spend_target": 0}])
     )
     assert result.verdict == "Review"
 

@@ -1693,7 +1693,7 @@ def _targeting_list_present(adset: dict[str, Any], field: str) -> bool:
 def check_adset_spend_minimum(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
     return _adset_presence_check(
         row, evidence=evidence,
-        present_fn=lambda a: _budget_present(a, "daily_min_spend_budget"),
+        present_fn=lambda a: _budget_present(a, "daily_min_spend_target"),
         label="a spend minimum",
     )
 
