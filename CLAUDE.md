@@ -288,7 +288,7 @@ Tomorrow (2026-06-02; MVP target 2026-06-05 — tight, so fire the async items f
 
 **Send first thing — async unblocks:**
 3. **Kerri** — follow up on the one-pager for the 3 decisions: final `check_id` list, naming convention, MVP check priority (gates finalizing the registry).
-4. **Maya** — lock the coordination contract (envelope schema + `qa_app` naming, worker URL/queue, Slack-thread protocol) and agree the Events-URL repoint plan for the true shared listener (today we run a separate Social app → our listener; prod is her one listener routing to our worker).
+4. **Maya — confirmed + parked until the prod switch-over (NOT blocking the demo/test).** Per Jack 2026-06-02: the envelope contract + `qa_app` naming are already agreed (he'll add `qa_app:"social"` to the listener when we deploy). The remaining two are deferred to cutover time: (a) hand Maya the Social routing config so her listener routes `qa_app:"social"` → `qa-buddy-runs-social` → our worker (env `QA_CLOUD_TASKS_WORKER_URL_SOCIAL=<worker>/tasks/qa/run`, OIDC audience = worker base URL **in project-number form**, queue `qa-buddy-runs-social`); (b) agree the prod one-shared-`@qa-buddy`-app model + how `slack-bot-token` reaches our worker. Today we run a separate Social app → our vendored listener, so none of this gates testing.
 
 **Main focus — unblocked build:**
 5. Confirm BigQuery field coverage: dig `facebook_ads__*` schema → the definitive "Phase-1 deterministic vs Review-by-design (field not in BQ / Riley+Nikki sprint)" map. Tells you exactly what's buildable now.
