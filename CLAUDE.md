@@ -145,6 +145,21 @@ Ran a multi-agent ultracode workflow auditing all 8 subsystems for correctness b
 - **#4** empty `countries []` → Review (was Fix). **#5** budget `"nan"/"inf"` → Review (`math.isfinite` guard). **#6** JSON `null` envelope field → coerced to `""` → graceful reject, not a silent 422 (`field_validator` in `api/models.py`). **#7** social `customer_id` regex `^\d{8,18}$` → `^\d{11,18}$` (was over-accepting 8-digit + the 10-digit Google shape).
 - **#8 (deferred)** `adset_audiences` only inspects `custom_audiences`, not interests — the "Interests *or* Custom Audiences" row. Field-blocked today (neither synced → safely Reviews); fold into the Riley/Nikki field work.
 
+## 🦚 Peacock special case — adapter Phase 1 built + deployed (2026-06-02)
+
+Peacock (`NBCU - Peacock`, client **`C22848672`**) is in Polaris normally, but its **live Meta data is NOT in the standard `polaris-data-317717.C22848672.facebook_ads__*` sync** (that exists but is **frozen at 2023-03-01**). Current Peacock data lives in a **standalone GCP project `nbc-287716`**, one unified cross-platform table `prod_peacock_final_data.creative_and_audience_data` (fresh; Meta + TikTok/Snap/Reddit/Pinterest/DV360, `Platform`-tagged). It's *performance/trafficking* data, not per-entity settings tables. Spec: `docs/peacock_adapter_spec.md`.
+
+**Phase 1 (built, tested, deployed — commit `73b2791`, worker rev `00015-qzk`):**
+- `app/adapters/peacock/client.py` **`PeacockMetaClient`** — one cached, date-bounded (`lookback_days=365`) query per campaign against the unified table (filter `Platform='Meta'`, by `Campaign_ID`); dedups daily rows to distinct entities; shapes them into the **standard `evidence` dicts** so the existing check registry runs unchanged. Splits `FinalCopy` (`"Headline: …\nBody: …"`) into `creative.title`+`creative.body`.
+- `app/adapters/peacock/routing.py` **`RoutingMetaClient`** — dispatches `get_campaign/ad_sets/ads` by `client_id`; `C22848672`→Peacock, all else→`BigQueryMetaClient`. Orchestration unchanged. Wired via `wiring.build_meta_client` + config `qa_peacock_*`.
+- Peacock account_ids (e.g. `172945950683253`, `208593543668655`, `798077387268392`) **already resolve to `C22848672`** via the standard resolver — no resolver change.
+- **Validated live against `nbc-287716` (campaign `120215246378710260`):** ad copy + **headline** spelling Pass (Gemini, via FinalCopy split), status/CTA run, **unsupported settings checks self-disable to Review**, objective→Review (needs vocab map). Standard path re-verified unbroken after adding routing. 394 worker + 19 listener tests green.
+- **Field map / vocab** (verified): `Objective` = Acquisition/Awareness/Engagement/Other; `Buy_Type`=Biddable; `CTABundle`=Learn More/Sign Up/Watch More; `Creative_Status`=Live/Paused. Ad copy is in **`FinalCopy` (78%)** (NOT `AdHeadline`/`AdDescription`, 0%); landing in `URL` (93%).
+
+**🚧 BLOCKER for a live Peacock `@-mention` (Phase 0):** the worker SA **`ppc-qa-buddy@…` does NOT have BQ read on `nbc-287716`** (confirmed 403). Need: grant `roles/bigquery.dataViewer` on project `nbc-287716` to `ppc-qa-buddy@prj-prd-ai-ppc-qa-pkph.iam.gserviceaccount.com` (same access `pse-daily-health-check@prj-prd-ai-pse-dly-check-6zo7…` already has). IAM ask on NBCU's project → via Pamela Nelson / Peacock data team. Code is deployed-and-waiting; the moment the grant lands, Peacock `@-mention` works.
+
+**Phase 2 (after grant + Kerri):** objective/CTA/buy_type vocab maps (Peacock→Meta or QA in Peacock terms), full-URL-vs-domain decision for landing check, and Peacock-specific Offer/Show/Format checks from the trafficking metadata.
+
 ## Deployed test listener (2026-06-01)
 
 The merged search+social listener is deployed (idle until the Events-URL repoint):
