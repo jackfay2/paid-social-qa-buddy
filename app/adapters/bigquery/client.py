@@ -72,6 +72,24 @@ class BigQueryMetaConfig:
     billing_project: str = ""
 
 
+def _ad_sort_key(ad: dict[str, Any]) -> tuple[int, int, str]:
+    """Total, deterministic sort key for an ad row by its id.
+
+    Numeric ids (the Meta ad id case) sort first and *numerically* (so "9" <
+    "10", not lexicographically); anything non-numeric or missing sorts after,
+    by string. Every key is an (int, int, str) tuple so the ordering is total
+    and stable across runs/Python versions — which is what makes the text-check
+    sampling reproducible.
+    """
+    raw = ad.get("id")
+    if raw is None:
+        raw = ad.get("ad_id")
+    s = "" if raw is None else str(raw)
+    if s.isdigit():
+        return (0, int(s), s)
+    return (1, 0, s)
+
+
 class BigQueryMetaClient:
     """Concrete MetaDataClient backed by BigQuery.
 
@@ -164,6 +182,14 @@ class BigQueryMetaClient:
         query = f"SELECT * FROM {table} WHERE campaign_id = @campaign_id"
         rows = self._run_query(query, campaign_id)
         result = [dict(row) for row in rows]
+        # Stable order by ad id. BigQuery returns rows in an unspecified order,
+        # and the text-check pipeline samples only the first TEXT_CHECK_AD_CAP
+        # ads on large campaigns — without a deterministic order, two runs of the
+        # same campaign would spell-check a different random subset and could
+        # disagree (Pass one run, Fix the next). Sorting here makes the sample —
+        # and the verdicts — reproducible. (No SQL ORDER BY: SELECT * spans
+        # schema-variant per-client tables, so we sort in Python defensively.)
+        result.sort(key=_ad_sort_key)
         self._attach_creatives(client_id, result)
         self._cache[cache_key] = result
         return result

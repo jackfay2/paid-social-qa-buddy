@@ -178,6 +178,24 @@ def test_get_ads_returns_list_of_dicts() -> None:
     assert result[0]["creative_title"] == "Big Sale"
 
 
+def test_get_ads_sorted_by_numeric_id_for_reproducible_sampling() -> None:
+    """Ads return in stable numeric-id order regardless of BQ row order, so the
+    text-check 'first N ads' sample is reproducible run-to-run."""
+    mock_bq = MagicMock()
+    _set_rows(mock_bq, [{"id": 10}, {"id": 2}, {"id": 100}, {"id": 9}])
+    result = _make_client(mock_bq).get_ads(client_id="C00030334", campaign_id="123")
+    assert [a["id"] for a in result] == [2, 9, 10, 100]
+
+
+def test_get_ads_missing_or_nonnumeric_ids_sort_last_without_crashing() -> None:
+    mock_bq = MagicMock()
+    _set_rows(mock_bq, [{"id": 5}, {"name": "no-id"}, {"id": "x9"}, {"id": 1}])
+    result = _make_client(mock_bq).get_ads(client_id="C00030334", campaign_id="123")
+    ids = [a.get("id") for a in result]
+    assert ids[:2] == [1, 5]  # numeric ids first, in numeric order
+    assert set(ids[2:]) == {None, "x9"}  # rest after, deterministically
+
+
 # --- per-job caching -------------------------------------------------------
 
 
