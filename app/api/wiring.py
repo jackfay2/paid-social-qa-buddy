@@ -13,6 +13,11 @@ from app.adapters.bigquery import (
     ResolverConfig,
 )
 from app.adapters.gemini import GeminiClient, GeminiConfig, StubGeminiClient
+from app.adapters.peacock import (
+    PeacockMetaClient,
+    PeacockMetaConfig,
+    RoutingMetaClient,
+)
 from app.adapters.sheets import GoogleSheetsClient, GoogleSheetsConfig
 from app.adapters.slack import SlackClient, SlackConfig
 from app.adapters.storage import FirestoreRunStore, InMemoryRunStore
@@ -52,6 +57,32 @@ def build_gemini_client(settings: Settings):
     )
 
 
+def build_meta_client(settings: Settings):
+    """The standard BigQuery Meta client, wrapped in a router that sends Peacock
+    (qa_peacock_client_id) to its own PeacockMetaClient (separate GCP project).
+
+    Other clients pass straight through to BigQueryMetaClient. If
+    qa_peacock_client_id is blank, no override is registered (Peacock disabled).
+    """
+    standard = BigQueryMetaClient(
+        config=BigQueryMetaConfig(
+            project=settings.bq_meta_project,
+            billing_project=settings.gcp_project_id,
+        )
+    )
+    overrides = {}
+    if settings.qa_peacock_client_id:
+        overrides[settings.qa_peacock_client_id] = PeacockMetaClient(
+            config=PeacockMetaConfig(
+                project=settings.qa_peacock_bq_project,
+                dataset=settings.qa_peacock_bq_dataset,
+                table=settings.qa_peacock_bq_table,
+                billing_project=settings.gcp_project_id,
+            )
+        )
+    return RoutingMetaClient(default=standard, overrides=overrides)
+
+
 def build_orchestration_service(settings: Settings) -> SocialQAOrchestrationService:
     return SocialQAOrchestrationService(
         run_store=build_run_store(settings),
@@ -61,12 +92,7 @@ def build_orchestration_service(settings: Settings) -> SocialQAOrchestrationServ
                 billing_project=settings.gcp_project_id,
             )
         ),
-        meta_client=BigQueryMetaClient(
-            config=BigQueryMetaConfig(
-                project=settings.bq_meta_project,
-                billing_project=settings.gcp_project_id,
-            )
-        ),
+        meta_client=build_meta_client(settings),
         sheet_client=GoogleSheetsClient(
             config=GoogleSheetsConfig(
                 worksheet_name=settings.qa_sheets_worksheet_name,

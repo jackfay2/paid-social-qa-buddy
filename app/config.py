@@ -48,6 +48,16 @@ class Settings(BaseSettings):
     # BigQuery (Meta data via Airbyte sync)
     bq_meta_project: str = "polaris-data-317717"
 
+    # Peacock special case: its live Meta data is NOT in the standard sync; it's
+    # in a standalone GCP project (unified cross-platform table). When a request
+    # resolves to qa_peacock_client_id, the worker routes to PeacockMetaClient
+    # reading the project/dataset/table below. Requires the worker SA to have
+    # bigquery.dataViewer on qa_peacock_bq_project. Blank client_id disables it.
+    qa_peacock_client_id: str = "C22848672"
+    qa_peacock_bq_project: str = "nbc-287716"
+    qa_peacock_bq_dataset: str = "prod_peacock_final_data"
+    qa_peacock_bq_table: str = "creative_and_audience_data"
+
     # Polaris (client directory lookup)
     polaris_api_url: str = "https://api.polaris.wpromote.com"
     polaris_api_token: str = ""
