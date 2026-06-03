@@ -117,6 +117,19 @@ def test_ad_creative_dimensions_is_manual_review() -> None:
     assert "1x1" in results[0].action and "9x16" in results[0].action
 
 
+def test_ad_creative_dimensions_peacock_routes_to_registry() -> None:
+    """Phase B: in Peacock mode the trafficking table carries Frame_Size, so the
+    check runs deterministically (routes to the runner) instead of the manual
+    note. Non-Peacock keeps the manual Review."""
+    rows = [_row("ad_creative_dimensions", builder_input="9:16")]
+    standard = execute_checks(rows, _passing_runner)
+    assert standard[0].verdict == "Review"
+    assert "manual" in standard[0].action.lower()
+    # Peacock run: routed to the (stub) runner, which returns Pass here.
+    peacock = execute_checks(rows, _passing_runner, evidence={"peacock_mode": True})
+    assert peacock[0].verdict == "Pass"
+
+
 def test_name_convention_checks_are_manual_review() -> None:
     """Kerri's call (2026-06-02): naming conventions vary by client, so the
     ad-set and ad name checks are MANUAL — always Review with instructions,

@@ -5,6 +5,7 @@ from __future__ import annotations
 from app.checks.meta_checks import (
     check_ad_call_to_action,
     check_ad_count,
+    check_ad_creative_dimensions,
     check_ad_destination_url,
     check_ad_status,
     check_adset_age_max,
@@ -1497,3 +1498,100 @@ def test_run_check_unknown_id_still_errors() -> None:
     result = run_check(row, evidence=_evidence({}))
     assert result.verdict == "Error"
     assert "Unrecognized" in result.action
+
+
+# --- ad_creative_dimensions (Peacock Phase B: Frame_Size) ------------------
+
+
+def _peacock_dim_evidence(frame_sizes: list[str | None]) -> dict:
+    """Peacock ad evidence: each entry is a trafficked Frame_Size, or None for an
+    ad whose trafficking row didn't sync a frame size."""
+    ads: list[dict] = []
+    for i, fs in enumerate(frame_sizes):
+        ad: dict = {"id": f"cr{i}", "creative": {}}
+        if fs is not None:
+            ad["trafficking"] = {"frame_size": fs}
+        ads.append(ad)
+    return {"campaign": {}, "ad_sets": [], "ads": ads, "peacock_mode": True}
+
+
+def test_dimensions_non_peacock_is_manual_review() -> None:
+    """For standard accounts the function itself defends to manual Review (the
+    pipeline also short-circuits before reaching it)."""
+    row = _row("ad_creative_dimensions", "1080x1920")
+    result = check_ad_creative_dimensions(
+        row, evidence=_ad_evidence([{"trafficking": {"frame_size": "1080x1920"}}])
+    )
+    assert result.verdict == "Review"
+    assert "manual" in result.action.lower()
+
+
+def test_dimensions_peacock_exact_match_passes() -> None:
+    row = _row("ad_creative_dimensions", "1080x1920, 1080x1080")
+    result = check_ad_creative_dimensions(
+        row, evidence=_peacock_dim_evidence(["1080x1920", "1080x1080"])
+    )
+    assert result.verdict == "Pass"
+
+
+def test_dimensions_peacock_ratio_input_matches_pixels() -> None:
+    """Builder may type a ratio (9x16) and match the trafficked pixel size."""
+    row = _row("ad_creative_dimensions", "9x16, 1x1")
+    result = check_ad_creative_dimensions(
+        row, evidence=_peacock_dim_evidence(["1080x1920", "1080x1080"])
+    )
+    assert result.verdict == "Pass"
+
+
+def test_dimensions_peacock_missing_expected_all_seen_is_fix() -> None:
+    """Expected 1:1 but every creative is 9:16 (all sizes seen) → confident Fix."""
+    row = _row("ad_creative_dimensions", "9:16, 1:1")
+    result = check_ad_creative_dimensions(
+        row, evidence=_peacock_dim_evidence(["1080x1920", "1080x1920"])
+    )
+    assert result.verdict == "Fix"
+    assert "1:1" in result.action
+
+
+def test_dimensions_peacock_missing_but_unsynced_ad_downgrades_to_review() -> None:
+    """An unsynced ad could BE the 'missing' size, so a would-be Fix → Review
+    (cardinal rule: never a false Fix)."""
+    row = _row("ad_creative_dimensions", "9:16, 1:1")
+    result = check_ad_creative_dimensions(
+        row, evidence=_peacock_dim_evidence(["1080x1920", None])
+    )
+    assert result.verdict == "Review"
+
+
+def test_dimensions_peacock_extra_size_is_review() -> None:
+    row = _row("ad_creative_dimensions", "9:16")
+    result = check_ad_creative_dimensions(
+        row, evidence=_peacock_dim_evidence(["1080x1920", "1080x1080"])
+    )
+    assert result.verdict == "Review"
+    assert "1:1" in result.action
+
+
+def test_dimensions_peacock_unparseable_builder_is_review() -> None:
+    row = _row("ad_creative_dimensions", "square-ish")
+    result = check_ad_creative_dimensions(
+        row, evidence=_peacock_dim_evidence(["1080x1920"])
+    )
+    assert result.verdict == "Review"
+
+
+def test_dimensions_peacock_no_frame_data_is_review() -> None:
+    row = _row("ad_creative_dimensions", "9:16")
+    result = check_ad_creative_dimensions(
+        row, evidence=_peacock_dim_evidence([None, None])
+    )
+    assert result.verdict == "Review"
+    assert "not available" in result.action.lower()
+
+
+def test_dimensions_peacock_unparseable_actual_is_review() -> None:
+    row = _row("ad_creative_dimensions", "9:16")
+    result = check_ad_creative_dimensions(
+        row, evidence=_peacock_dim_evidence(["weird-value"])
+    )
+    assert result.verdict == "Review"

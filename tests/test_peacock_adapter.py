@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from unittest.mock import MagicMock
 
 import pytest
@@ -167,3 +168,107 @@ def test_routing_sends_peacock_to_override_else_default() -> None:
 def test_routing_empty_overrides_all_default() -> None:
     router = RoutingMetaClient(default=_Stub("standard"))
     assert router.get_campaign("C22848672", CAMPAIGN)["tag"] == "standard"
+
+
+# --- PeacockMetaClient trafficking merge (Phase B) -------------------------
+
+
+def _perf_row(cid: str, dist=None, ver=None, adset: str = "as1") -> dict:
+    return {
+        "creative_id": cid, "creative_name": f"{cid}_name", "status": "Live",
+        "copy": "Headline: H\nBody: B", "url": "https://www.peacocktv.com/x",
+        "cta": "Sign Up", "adset_id": adset, "adset_name": "AS",
+        "objective": "Acquisition", "buy_type": "Biddable", "campaign_name": "C",
+        "distribution_id": dist, "version_number": ver,
+    }
+
+
+def _traf_row(dist=None, ver=None, frame: str = "1080x1920", show: str = "REALHOUS") -> dict:
+    return {
+        "distribution_id": dist, "version_number": ver, "frame_size": frame,
+        "asset_type": "Video", "flight_start_date": date(2025, 11, 24),
+        "flight_end_date": date(2026, 6, 30), "flight_window_flag": "All Clear",
+        "trafficking_status": "Live", "confirmed_paused": False, "offer": None,
+        "show_name": show, "genre": "Reality",
+    }
+
+
+def _job(rows: list[dict]) -> MagicMock:
+    """A fake BQ query job whose .result() yields `rows`."""
+    job = MagicMock()
+    job.result.return_value = rows
+    return job
+
+
+def _client_traf(perf_rows: list[dict], traf_rows: list[dict]) -> PeacockMetaClient:
+    """Mock BQ where the 1st query returns perf rows and the 2nd returns
+    trafficking rows (matches get_ads' call order: _load then _trafficking_lookup)."""
+    mock_bq = MagicMock()
+    mock_bq.query.side_effect = [_job(perf_rows), _job(traf_rows)]
+    return PeacockMetaClient(config=PeacockMetaConfig(billing_project="bill"), client=mock_bq)
+
+
+def test_get_ads_merges_trafficking_by_distribution_id() -> None:
+    client = _client_traf(
+        [_perf_row("cr1", dist="231270"), _perf_row("cr2", dist="253713")],
+        [_traf_row(dist="231270", frame="1080x1920", show="REALHOUS"),
+         _traf_row(dist="253713", frame="1080x1080", show="LOVEISLA")],
+    )
+    by_id = {a["id"]: a for a in client.get_ads("C22848672", CAMPAIGN)}
+    assert by_id["cr1"]["trafficking"]["frame_size"] == "1080x1920"
+    assert by_id["cr1"]["trafficking"]["show"] == "REALHOUS"
+    # DATE columns are ISO-stringified so the evidence stays JSON-clean.
+    assert by_id["cr1"]["trafficking"]["flight_start_date"] == "2025-11-24"
+    assert by_id["cr1"]["trafficking"]["flight_end_date"] == "2026-06-30"
+    assert by_id["cr2"]["trafficking"]["frame_size"] == "1080x1080"
+
+
+def test_get_ads_trafficking_version_fallback() -> None:
+    """Blank distribution id -> join on version number (Pamela's documented
+    fallback for un-reused historical creatives)."""
+    client = _client_traf(
+        [_perf_row("cr1", dist="", ver="v9")],
+        [_traf_row(dist=None, ver="v9", frame="1080x1350")],
+    )
+    ads = client.get_ads("C22848672", CAMPAIGN)
+    assert ads[0]["trafficking"]["frame_size"] == "1080x1350"
+
+
+def test_get_ads_no_distribution_ids_skips_trafficking_query() -> None:
+    """Perf rows with no distribution/version ids -> no second query, no
+    trafficking sub-dict (clean Phase-A degrade)."""
+    mock_bq = MagicMock()
+    mock_bq.query.side_effect = [_job([_perf_row("cr1")])]  # only ONE query expected
+    client = PeacockMetaClient(config=PeacockMetaConfig(billing_project="bill"), client=mock_bq)
+    ads = client.get_ads("C22848672", CAMPAIGN)
+    assert mock_bq.query.call_count == 1
+    assert "trafficking" not in ads[0]
+
+
+def test_get_ads_trafficking_query_failure_degrades_gracefully() -> None:
+    """A trafficking query error must not break the run — ads come back perf-only."""
+    mock_bq = MagicMock()
+    mock_bq.query.side_effect = [_job([_perf_row("cr1", dist="231270")]), RuntimeError("permission denied")]
+    client = PeacockMetaClient(config=PeacockMetaConfig(billing_project="bill"), client=mock_bq)
+    ads = client.get_ads("C22848672", CAMPAIGN)
+    assert len(ads) == 1
+    assert "trafficking" not in ads[0]
+
+
+def test_trafficking_lookup_is_cached() -> None:
+    """get_ads twice -> perf + trafficking each queried once (both cached)."""
+    client = _client_traf([_perf_row("cr1", dist="231270")], [_traf_row(dist="231270")])
+    client.get_ads("C22848672", CAMPAIGN)
+    client.get_ads("C22848672", CAMPAIGN)
+    assert client._client.query.call_count == 2  # 1 perf + 1 trafficking, then cached
+
+
+def test_trafficking_disabled_when_table_blank() -> None:
+    """Blank trafficking_table -> merge skipped entirely (no second query)."""
+    mock_bq = MagicMock()
+    mock_bq.query.side_effect = [_job([_perf_row("cr1", dist="231270")])]
+    cfg = PeacockMetaConfig(billing_project="bill", trafficking_table="")
+    client = PeacockMetaClient(config=cfg, client=mock_bq)
+    ads = client.get_ads("C22848672", CAMPAIGN)
+    assert mock_bq.query.call_count == 1
+    assert "trafficking" not in ads[0]

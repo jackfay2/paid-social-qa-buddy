@@ -69,6 +69,16 @@ ALWAYS_REVIEW_CHECK_ACTIONS: dict[str, str] = {
     ),
 }
 
+# Check_ids that are manual Review for standard clients but become DETERMINISTIC
+# in Peacock mode (the trafficking table carries the data — e.g. Frame_Size for
+# ad_creative_dimensions). For a Peacock run these route to the registry instead
+# of the fixed manual-Review note. (Phase B; see docs/peacock_phase_b_spec.md.)
+PEACOCK_DETERMINISTIC_CHECK_IDS: frozenset[str] = frozenset(
+    {
+        "ad_creative_dimensions",
+    }
+)
+
 
 def is_builder_na(value: str) -> bool:
     """True when the builder left the expected-value cell blank or marked N/A."""
@@ -112,6 +122,7 @@ def execute_checks(
     """
     results: list[CheckResult] = []
     force = (force_run_check_ids or set()) | set(ALWAYS_RUN_CHECK_IDS)
+    peacock_mode = bool(isinstance(evidence, dict) and evidence.get("peacock_mode"))
 
     for row in rows:
         if not row.check_id:
@@ -124,7 +135,13 @@ def execute_checks(
             # "Error: Unrecognized check_id".
             continue
 
-        if row.check_id in ALWAYS_REVIEW_CHECK_ACTIONS:
+        # In Peacock mode, a few normally-manual checks have real data (Frame_Size,
+        # …) and should run deterministically — let them fall through to the
+        # registry instead of the fixed manual-Review note.
+        manual_review = row.check_id in ALWAYS_REVIEW_CHECK_ACTIONS and not (
+            peacock_mode and row.check_id in PEACOCK_DETERMINISTIC_CHECK_IDS
+        )
+        if manual_review:
             results.append(
                 CheckResult(
                     row_index=row.row_index,

@@ -57,6 +57,14 @@ class Settings(BaseSettings):
     qa_peacock_bq_project: str = "nbc-287716"
     qa_peacock_bq_dataset: str = "prod_peacock_final_data"
     qa_peacock_bq_table: str = "creative_and_audience_data"
+    # Phase B: the Airtable trafficking mirror (build-time spec). Joined to the
+    # performance table per creative by distribution ID (Pamela, 2026-06-03):
+    # perf.DistributionID <-> traf.Distribution_, with VersionNumber <-> Version_
+    # as the fallback for un-reused historical creatives. Unlocks deterministic
+    # creative dimensions (Frame_Size), flight dates, and pre-computed QC flags.
+    # Blank table disables the trafficking merge (perf-only Peacock, Phase A).
+    qa_peacock_trafficking_dataset: str = "AirTable_v2"
+    qa_peacock_trafficking_table: str = "wp_live_trafficking"
 
     # Polaris (client directory lookup)
     polaris_api_url: str = "https://api.polaris.wpromote.com"

@@ -1377,6 +1377,154 @@ def check_ad_call_to_action(row: CheckRow, *, evidence: dict[str, Any] | None = 
     return _pass(row)
 
 
+# --- ad_creative_dimensions (Peacock: deterministic via Frame_Size) --------
+#
+# Standard clients: creative dimensions aren't reliably in BigQuery, so this is
+# a manual Review (the pipeline routes non-Peacock runs to
+# ALWAYS_REVIEW_CHECK_ACTIONS before reaching this function). In PEACOCK mode the
+# trafficking table (Phase B) carries a clean Frame_Size per creative
+# ("1080x1920", "1080x1080", …), so we can verify the expected sizes are present.
+#
+# Comparison is by ASPECT RATIO, so a builder may type pixels ("1080x1920") OR a
+# ratio ("9x16" / "9:16") and still match the trafficked pixel size. Conservative
+# per the cardinal rule (never a false Fix/Pass):
+#   - any unparseable token on EITHER side  -> Review (with the actual sizes shown)
+#   - an expected size confidently absent    -> Fix, BUT only when every ad's size
+#                                               was seen (an unsynced ad could be
+#                                               the missing size) — else Review
+#   - exact set match                        -> Pass
+# The trafficked sizes are always echoed in the action so a human sees them even
+# on Review — already a win over the old blanket "verify in Ads Manager" note.
+
+# Accepts WxH or W:H with common separators (x, ×, :, "by", *).
+_FRAME_SEP_RE = re.compile(r"\s*(?:x|×|:|by|\*)\s*", re.IGNORECASE)
+
+# Where a creative's frame size can sit on the ad record (Peacock attaches the
+# trafficked spec under `trafficking`).
+_AD_FRAME_FIELDS = (
+    "trafficking.frame_size",
+    "frame_size",
+    "creative.frame_size",
+)
+
+
+def _canonical_aspect_ratio(value: Any) -> str:
+    """Reduce a 'WxH' or 'W:H' dimension to a canonical 'W:H' aspect ratio
+    ("1080x1920" -> "9:16", "1x1" -> "1:1"). Returns "" when it can't be read as
+    two positive integers (caller → Review, never a guessed Fix)."""
+    if value is None:
+        return ""
+    text = str(value).strip().lower()
+    if not text:
+        return ""
+    parts = _FRAME_SEP_RE.split(text)
+    if len(parts) != 2:
+        return ""
+    try:
+        width = int(parts[0])
+        height = int(parts[1])
+    except ValueError:
+        return ""
+    if width <= 0 or height <= 0:
+        return ""
+    divisor = math.gcd(width, height)
+    return f"{width // divisor}:{height // divisor}"
+
+
+def _read_ad_frame_size(ad: dict[str, Any]) -> str:
+    for path in _AD_FRAME_FIELDS:
+        value = _read_path(ad, path)
+        if value:
+            return value
+    return ""
+
+
+def check_ad_creative_dimensions(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
+    # Only Peacock carries frame data in BigQuery; for other accounts this is a
+    # manual check. (The pipeline normally short-circuits non-Peacock runs to the
+    # manual-Review note; this guard makes the function safe if called directly.)
+    if not _peacock_mode(evidence):
+        return _review(
+            row,
+            "Creative dimensions are a manual check for this account; verify in Ads Manager.",
+        )
+
+    ads = _ads(evidence)
+    if not ads:
+        return _review(row, "No ads found in BigQuery for this campaign.")
+
+    # Parse builder expectation into canonical aspect ratios; any unparseable
+    # token → Review (don't risk a Fix on a format we didn't understand).
+    expected: set[str] = set()
+    for token in [t.strip() for t in str(row.builder_input).split(",") if t.strip()]:
+        ratio = _canonical_aspect_ratio(token)
+        if not ratio:
+            return _review(
+                row,
+                f'Could not interpret the expected dimension "{token}". '
+                "Use pixels (1080x1920) or a ratio (9:16).",
+            )
+        expected.add(ratio)
+    if not expected:
+        return _review(row, "Expected creative dimensions are blank; verify manually.")
+
+    actual_ratios: set[str] = set()
+    actual_raw: list[str] = []
+    unparseable: list[str] = []
+    missing = 0
+    for ad in ads:
+        raw = _read_ad_frame_size(ad)
+        if not raw:
+            missing += 1
+            continue
+        actual_raw.append(raw)
+        ratio = _canonical_aspect_ratio(raw)
+        if not ratio:
+            unparseable.append(raw)
+            continue
+        actual_ratios.add(ratio)
+
+    if not actual_raw:
+        return _review(
+            row,
+            "Creative dimensions (Frame_Size) not available in the trafficking data "
+            "for any ad; verify manually.",
+        )
+    sizes_str = ", ".join(sorted(set(actual_raw)))
+    if unparseable:
+        return _review(
+            row,
+            f'Could not parse the trafficked frame size "{unparseable[0]}". '
+            f"Trafficked sizes: {sizes_str}. Verify manually.",
+        )
+
+    missing_expected = expected - actual_ratios
+    extra = actual_ratios - expected
+
+    if missing_expected:
+        # Confident Fix only if we saw EVERY ad's size; an unsynced ad could be
+        # the very size we think is missing → Review instead (never a false Fix).
+        if missing:
+            return _review(
+                row,
+                f"Expected {sorted(expected)}; trafficked sizes seen: {sizes_str}, but "
+                f"{missing} ad(s) had no frame size — can't confirm {sorted(missing_expected)} "
+                "is absent. Verify manually.",
+            )
+        return _fix(
+            row,
+            f"Expected {sorted(expected)}, but no creative has {sorted(missing_expected)}. "
+            f"Trafficked sizes: {sizes_str}.",
+        )
+    if extra:
+        return _review(
+            row,
+            f"Expected {sorted(expected)}; trafficked sizes also include {sorted(extra)} "
+            f"({sizes_str}). Confirm the extra size is intended.",
+        )
+    return _pass(row, f"Trafficked sizes match {sorted(expected)}: {sizes_str}.")
+
+
 # === Ad-set level: conversion event (the Peacock-Olympics check) =============
 #
 # promoted_object.custom_event_type — the optimization/conversion event the ad

@@ -77,6 +77,8 @@ def build_meta_client(settings: Settings):
                 project=settings.qa_peacock_bq_project,
                 dataset=settings.qa_peacock_bq_dataset,
                 table=settings.qa_peacock_bq_table,
+                trafficking_dataset=settings.qa_peacock_trafficking_dataset,
+                trafficking_table=settings.qa_peacock_trafficking_table,
                 billing_project=settings.gcp_project_id,
             )
         )

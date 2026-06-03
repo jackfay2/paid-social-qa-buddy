@@ -32,6 +32,21 @@ Field map (verified against live data 2026-06-02):
   ad.creative.body   (copy)       <- FinalCopy "Body: …" part (78% populated)
   ad.creative.link_url            <- URL             (93% populated)
   ad.creative.call_to_action_type <- CTABundle       ("Sign Up"/"Learn More"/…)
+
+Phase B (the trafficking table `AirTable_v2.wp_live_trafficking`): joined per
+creative by distribution ID (perf.DistributionID <-> traf.Distribution_, with
+VersionNumber <-> Version_ as the fallback for un-reused historical creatives —
+Pamela, 2026-06-03). Adds a `trafficking` sub-dict to each ad with the
+build-time spec:
+  ad.trafficking.frame_size         <- Frame_Size    ("1080x1920" — drives ad_creative_dimensions)
+  ad.trafficking.asset_type         <- Asset_Type
+  ad.trafficking.flight_start_date  <- Media_Flight_Date (DATE)
+  ad.trafficking.flight_end_date    <- Media_End_Date    (DATE)
+  ad.trafficking.flight_window_flag <- Live_After_End_Date_Warning (pre-computed QC)
+  ad.trafficking.trafficking_status <- Trafficking_Status
+  ad.trafficking.offer/show/genre   <- Offer[0]/Show_Name_For_File_Name/Genre
+The merge is best-effort: a trafficking query failure logs + degrades to
+perf-only (checks that need trafficking fields then return Review, never Fix).
 """
 
 from __future__ import annotations
@@ -76,6 +91,11 @@ class PeacockMetaConfig:
     # scan to recent partitions: QA cares about current settings, not all-time
     # history (an always-on campaign can have thousands of all-time creatives).
     lookback_days: int = 365
+    # Phase B: the Airtable trafficking mirror (same project). Joined per creative
+    # by distribution ID. Blank trafficking_table -> merge skipped (Phase-A
+    # behavior: perf-only). See docs/peacock_phase_b_spec.md.
+    trafficking_dataset: str = "AirTable_v2"
+    trafficking_table: str = "wp_live_trafficking"
 
 
 def _creative_sort_key(creative_id: Any) -> tuple[int, int, str]:
@@ -131,6 +151,9 @@ class PeacockMetaClient:
             project=self.config.billing_project or self.config.project
         )
         self._cache: dict[str, list[dict[str, Any]]] = {}
+        # Phase B trafficking lookup, cached per campaign: maps the join key
+        # (distribution id, and version number as fallback) -> trafficking row.
+        self._traf_cache: dict[str, dict[str, dict[str, Any]]] = {}
 
     # --- MetaDataClient protocol ------------------------------------------
 
@@ -157,24 +180,29 @@ class PeacockMetaClient:
 
     def get_ads(self, client_id: str, campaign_id: str) -> list[dict[str, Any]]:
         rows = self._load(campaign_id)
+        traffic = self._trafficking_lookup(campaign_id)
         ads: list[dict[str, Any]] = []
         for r in rows:
             headline, body = split_final_copy(r.get("copy"))
-            ads.append(
-                {
-                    "id": r.get("creative_id"),
-                    "ad_id": r.get("creative_id"),
-                    "name": r.get("creative_name"),
-                    "adset_id": r.get("adset_id"),
-                    "effective_status": r.get("status"),
-                    "creative": {
-                        "title": headline,
-                        "body": body,
-                        "link_url": r.get("url"),
-                        "call_to_action_type": r.get("cta"),
-                    },
-                }
-            )
+            ad: dict[str, Any] = {
+                "id": r.get("creative_id"),
+                "ad_id": r.get("creative_id"),
+                "name": r.get("creative_name"),
+                "adset_id": r.get("adset_id"),
+                "effective_status": r.get("status"),
+                "creative": {
+                    "title": headline,
+                    "body": body,
+                    "link_url": r.get("url"),
+                    "call_to_action_type": r.get("cta"),
+                },
+            }
+            # Phase B: merge the trafficked build-spec for this creative, joined
+            # by distribution id (version number as the documented fallback).
+            traf = self._match_trafficking(traffic, r)
+            if traf:
+                ad["trafficking"] = traf
+            ads.append(ad)
         return ads
 
     # --- internals ---------------------------------------------------------
@@ -205,7 +233,9 @@ class PeacockMetaClient:
               ANY_VALUE(Ad_Set_Name) AS adset_name,
               ANY_VALUE(Objective) AS objective,
               ANY_VALUE(Buy_Type) AS buy_type,
-              ANY_VALUE(Campaign) AS campaign_name
+              ANY_VALUE(Campaign) AS campaign_name,
+              CAST(ANY_VALUE(DistributionID) AS STRING) AS distribution_id,
+              CAST(ANY_VALUE(VersionNumber) AS STRING) AS version_number
             FROM {table}
             WHERE Platform = @platform
               AND CAST(Campaign_ID AS STRING) = @campaign_id
@@ -229,3 +259,127 @@ class PeacockMetaClient:
         )
         self._cache[campaign_id] = result
         return result
+
+    # --- Phase B: trafficking-table merge ---------------------------------
+
+    def _trafficking_lookup(self, campaign_id: str) -> dict[str, dict[str, dict[str, Any]]]:
+        """Fetch the trafficked build-spec for this campaign's creatives, keyed
+        for the per-creative join (one query, cached).
+
+        Returns {"by_dist": {distribution_id: row}, "by_version": {version: row}}.
+        Best-effort: if the trafficking table isn't configured, the campaign has
+        no distribution ids to join on, or the query fails, returns {} so the run
+        degrades cleanly to perf-only (Phase A) — never raises into the run.
+        """
+        if not self.config.trafficking_table:
+            return {}
+        if campaign_id in self._traf_cache:
+            return self._traf_cache[campaign_id]
+
+        perf = self._load(campaign_id)
+        dist_ids = sorted({r["distribution_id"] for r in perf if r.get("distribution_id")})
+        versions = sorted({r["version_number"] for r in perf if r.get("version_number")})
+        if not dist_ids and not versions:
+            self._traf_cache[campaign_id] = {}
+            return {}
+
+        traf_table = (
+            f"`{self.config.project}.{self.config.trafficking_dataset}."
+            f"{self.config.trafficking_table}`"
+        )
+        query = f"""
+            SELECT
+              CAST(Distribution_ AS STRING) AS distribution_id,
+              CAST(Version_ AS STRING) AS version_number,
+              Frame_Size AS frame_size,
+              Asset_Type AS asset_type,
+              Media_Flight_Date AS flight_start_date,
+              Media_End_Date AS flight_end_date,
+              Live_After_End_Date_Warning AS flight_window_flag,
+              Trafficking_Status AS trafficking_status,
+              Confirmed_Paused_Creative AS confirmed_paused,
+              (SELECT x FROM UNNEST(Offer) x WHERE x IS NOT NULL AND x != '' LIMIT 1) AS offer,
+              Show_Name_For_File_Name AS show_name,
+              Genre AS genre
+            FROM {traf_table}
+            WHERE @platform IN UNNEST(Platform)
+              AND (CAST(Distribution_ AS STRING) IN UNNEST(@dist_ids)
+                   OR CAST(Version_ AS STRING) IN UNNEST(@versions))
+            ORDER BY distribution_id, version_number
+        """
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("platform", "STRING", self.config.platform),
+                bigquery.ArrayQueryParameter("dist_ids", "STRING", dist_ids),
+                bigquery.ArrayQueryParameter("versions", "STRING", versions),
+            ]
+        )
+        try:
+            rows = [dict(r) for r in self._client.query(query, job_config=job_config).result()]
+        except Exception as exc:  # noqa: BLE001 — enrichment is best-effort
+            _logger.warning(
+                "peacock_trafficking_query_failed",
+                extra={"campaign_id": campaign_id, "error": str(exc)},
+            )
+            self._traf_cache[campaign_id] = {}
+            return {}
+
+        by_dist: dict[str, dict[str, Any]] = {}
+        by_version: dict[str, dict[str, Any]] = {}
+        for r in rows:
+            shaped = self._shape_trafficking_row(r)
+            d = r.get("distribution_id")
+            v = r.get("version_number")
+            if d and d not in by_dist:
+                by_dist[d] = shaped
+            if v and v not in by_version:
+                by_version[v] = shaped
+        lookup = {"by_dist": by_dist, "by_version": by_version}
+        _logger.info(
+            "peacock_trafficking_done",
+            extra={
+                "campaign_id": campaign_id,
+                "trafficking_rows": len(rows),
+                "matched_distributions": len(by_dist),
+            },
+        )
+        self._traf_cache[campaign_id] = lookup
+        return lookup
+
+    @staticmethod
+    def _shape_trafficking_row(r: dict[str, Any]) -> dict[str, Any]:
+        """Map a raw trafficking BQ row to the `ad.trafficking` sub-dict. Dates
+        are ISO strings so the evidence stays JSON-clean for the Firestore audit
+        log; the date checks parse ISO fine."""
+        def _iso(value: Any) -> Any:
+            return value.isoformat() if hasattr(value, "isoformat") else value
+
+        return {
+            "frame_size": r.get("frame_size"),
+            "asset_type": r.get("asset_type"),
+            "flight_start_date": _iso(r.get("flight_start_date")),
+            "flight_end_date": _iso(r.get("flight_end_date")),
+            "flight_window_flag": r.get("flight_window_flag"),
+            "trafficking_status": r.get("trafficking_status"),
+            "confirmed_paused": r.get("confirmed_paused"),
+            "offer": r.get("offer"),
+            "show": r.get("show_name"),
+            "genre": r.get("genre"),
+        }
+
+    @staticmethod
+    def _match_trafficking(
+        lookup: dict[str, dict[str, dict[str, Any]]], perf_row: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Match a perf creative to its trafficking row: distribution id first
+        (the primary key), version number as the fallback (Pamela's rule for
+        un-reused historical creatives whose distribution id is blank)."""
+        if not lookup:
+            return {}
+        d = perf_row.get("distribution_id")
+        v = perf_row.get("version_number")
+        if d and d in lookup.get("by_dist", {}):
+            return lookup["by_dist"][d]
+        if v and v in lookup.get("by_version", {}):
+            return lookup["by_version"][v]
+        return {}

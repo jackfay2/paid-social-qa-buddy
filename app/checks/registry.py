@@ -14,6 +14,7 @@ from typing import Any
 from app.checks.meta_checks import (
     check_ad_call_to_action,
     check_ad_count,
+    check_ad_creative_dimensions,
     check_ad_destination_url,
     check_ad_status,
     check_adset_age_max,
@@ -80,6 +81,11 @@ CHECK_REGISTRY: dict[str, CheckFunction] = {
     "ad_count": check_ad_count,
     "ad_destination_url": check_ad_destination_url,
     "ad_call_to_action": check_ad_call_to_action,
+    # Creative dimensions: manual Review for standard clients (see
+    # ALWAYS_REVIEW_CHECK_ACTIONS), but deterministic in Peacock mode where the
+    # trafficking table carries Frame_Size (the pipeline routes Peacock runs here
+    # instead of the manual note — see PEACOCK_DETERMINISTIC_CHECK_IDS).
+    "ad_creative_dimensions": check_ad_creative_dimensions,
     # Text checks (Gemini): defined in app/checks/text_checks.py, NOT here.
     # The pipeline skips text-check rows in execute_checks and routes them
     # through execute_text_checks. Adding a text check is a TEXT_CHECK_DEFINITIONS
