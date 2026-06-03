@@ -78,6 +78,17 @@ class PeacockMetaConfig:
     lookback_days: int = 365
 
 
+def _creative_sort_key(creative_id: Any) -> tuple[int, int, str]:
+    """Stable, total sort key by creative id (numeric ids sort numerically).
+
+    The text-check pipeline samples only the first N creatives on a large
+    campaign; without a deterministic order, two runs spell-check a different
+    subset and can disagree. Same reproducibility guard the standard adapter uses.
+    """
+    s = "" if creative_id is None else str(creative_id)
+    return (0, int(s), s) if s.isdigit() else (1, 0, s)
+
+
 def split_final_copy(text: Any) -> tuple[str, str]:
     """Split Peacock's `FinalCopy` into (headline, body).
 
@@ -209,6 +220,9 @@ class PeacockMetaClient:
             ]
         )
         result = [dict(r) for r in self._client.query(query, job_config=job_config).result()]
+        # Deterministic order so the text-check "first N creatives" sample is
+        # reproducible run-to-run (BigQuery GROUP BY order is unspecified).
+        result.sort(key=lambda r: _creative_sort_key(r.get("creative_id")))
         _logger.info(
             "peacock_query_done",
             extra={"campaign_id": campaign_id, "row_count": len(result)},

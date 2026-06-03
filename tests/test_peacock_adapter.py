@@ -127,6 +127,17 @@ def test_invalid_campaign_id_raises() -> None:
         _client(_rows()).get_campaign("C22848672", "not-numeric")
 
 
+def test_get_ads_sorted_by_creative_id_for_reproducible_sampling() -> None:
+    """Creatives come back in stable numeric-id order regardless of BQ row
+    order, so the text-check 'first N' sample is reproducible run-to-run."""
+    def row(cid):
+        return {"creative_id": cid, "creative_name": "", "status": "Live", "copy": "x",
+                "url": "u", "cta": "Sign Up", "adset_id": "as1", "adset_name": "AS1",
+                "objective": "Acquisition", "buy_type": "Biddable", "campaign_name": "C"}
+    ads = _client([row("100"), row("2"), row("30")]).get_ads("C22848672", CAMPAIGN)
+    assert [a["id"] for a in ads] == ["2", "30", "100"]
+
+
 # --- RoutingMetaClient -----------------------------------------------------
 
 
