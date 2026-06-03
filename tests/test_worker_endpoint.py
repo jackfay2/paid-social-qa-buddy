@@ -200,6 +200,23 @@ def test_peacock_defaults_false_and_null_safe(monkeypatch) -> None:
     assert captured2["val"] is False
 
 
+def test_peacock_keyword_in_requester_text_triggers_mode(monkeypatch) -> None:
+    """The builder writing 'Peacock' in the @-mention (carried as requester_text)
+    turns on Peacock mode — no explicit flag, no listener change needed."""
+    captured = _capture_field(monkeypatch, "peacock")
+    payload = {**_PAYLOAD, "requester_text": "account_id: 123\ncampaign_id: 456\nPeacock account"}
+    response = _client().post("/tasks/qa/run", json=payload)
+    assert response.status_code == 200
+    assert captured["val"] is True
+
+
+def test_no_peacock_keyword_stays_normal(monkeypatch) -> None:
+    captured = _capture_field(monkeypatch, "peacock")
+    payload = {**_PAYLOAD, "requester_text": "account_id: 123\ncampaign_id: 456"}
+    _client().post("/tasks/qa/run", json=payload)
+    assert captured["val"] is False
+
+
 # --- Slack behavior --------------------------------------------------------
 
 

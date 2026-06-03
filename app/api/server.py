@@ -131,6 +131,11 @@ def qa_run_task(payload: SocialTaskRequest, request: Request) -> SocialTaskRespo
     service = wiring.build_orchestration_service(settings)
     notifier = wiring.build_slack_client(settings)
 
+    # Peacock mode triggers if the explicit flag is set OR the builder wrote
+    # "Peacock" anywhere in the @-mention (the raw text rides along as
+    # requester_text). Keyword match is case-insensitive; "Peacock account" → on.
+    peacock = bool(payload.peacock) or ("peacock" in (payload.requester_text or "").lower())
+
     orchestration_request = OrchestrationRequest(
         request_id=payload.request_id,
         account_id=payload.account_id,
@@ -139,7 +144,7 @@ def qa_run_task(payload: SocialTaskRequest, request: Request) -> SocialTaskRespo
         sheet_url=payload.sheet_url,
         thread_ts=payload.thread_ts,
         channel_id=payload.channel_id,
-        peacock=payload.peacock,
+        peacock=peacock,
     )
 
     result = _run_with_timeout(

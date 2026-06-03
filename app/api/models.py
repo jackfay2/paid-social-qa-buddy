@@ -37,8 +37,12 @@ class SocialTaskRequest(BaseModel):
     campaign_id: str = ""
     campaign_name: str = ""
     qa_app: str = "social"
-    # The listener sets this when the builder puts "Peacock" in the @-mention —
-    # forces the Peacock data path + vocabulary regardless of account resolution.
+    # The raw @-mention text (the listener already forwards it). The worker scans
+    # it for the "Peacock" keyword to trigger Peacock mode — so no listener change
+    # is needed (see server.py).
+    requester_text: str = ""
+    # Forces the Peacock data path + vocabulary regardless of account resolution.
+    # Set either explicitly in the envelope or derived from requester_text.
     peacock: bool = False
 
 
