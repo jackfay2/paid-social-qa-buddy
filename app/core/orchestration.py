@@ -84,12 +84,18 @@ class SocialQAOrchestrationService:
         gemini_client: GeminiClient | None = None,
         qa_initial: str = "QA-BOT",
         fix_items_limit: int = 5,
+        peacock_client_ids: frozenset[str] | set[str] | None = None,
     ) -> None:
         self.run_store = run_store
         self.resolver = resolver
         self.meta_client = meta_client
         self.sheet_client = sheet_client
         self.check_runner = check_runner
+        # Client_ids whose data is Peacock's (separate GCP project + own
+        # vocabulary). When the resolved client_id is in here, evidence carries
+        # peacock_mode=True so the value-match checks compare in Peacock's own
+        # terms (Acquisition / Biddable / …) instead of mapping to Meta enums.
+        self.peacock_client_ids = frozenset(peacock_client_ids or ())
         # Optional: when None, text checks are skipped silently. Lets the local
         # dev path run without a Gemini key (existing tests don't pass one).
         self.gemini_client = gemini_client
@@ -284,6 +290,7 @@ class SocialQAOrchestrationService:
         return {
             "client_id": client_id,
             "campaign_id": campaign_id,
+            "peacock_mode": client_id in self.peacock_client_ids,
             "campaign": self.meta_client.get_campaign(client_id, campaign_id),
             "ad_sets": self.meta_client.get_ad_sets(client_id, campaign_id),
             "ads": self.meta_client.get_ads(client_id, campaign_id),

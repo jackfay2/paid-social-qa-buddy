@@ -166,8 +166,30 @@ def _canonical_objective(value: Any) -> str:
     return _OBJECTIVE_SYNONYMS.get(norm, "")
 
 
+def _peacock_mode(evidence: dict[str, Any] | None) -> bool:
+    """True when this run is a Peacock account (its data + vocabulary differ)."""
+    return bool(isinstance(evidence, dict) and evidence.get("peacock_mode"))
+
+
+def _peacock_value_match(row: CheckRow, actual: Any, label: str) -> CheckResult:
+    """Compare builder vs BQ in Peacock's OWN vocabulary (no Meta-enum mapping).
+
+    Peacock stores its own terms — Objective='Acquisition', Buy_Type='Biddable' —
+    and builders QA in those same terms (Kerri approved Peacock-specific
+    vocabulary, 2026-06-03). So a normalized direct match is the right comparison.
+    Blank actual -> Review (never a false Pass).
+    """
+    if _is_blank(actual):
+        return _review(row, f"{label} not available in Peacock data; verify manually.")
+    if _norm(row.builder_input) == _norm(actual):
+        return _pass(row)
+    return _fix(row, f'Expected "{row.builder_input}", got "{actual}"')
+
+
 def check_campaign_objective(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
     actual = _campaign(evidence).get("objective")
+    if _peacock_mode(evidence):
+        return _peacock_value_match(row, actual, "Campaign objective")
     if _is_blank(actual):
         return _review(
             row, "Campaign objective not available in BigQuery; verify manually."
@@ -219,6 +241,8 @@ def _canonical_buying_type(value: Any) -> str:
 
 def check_campaign_buying_type(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
     actual = _campaign(evidence).get("buying_type")
+    if _peacock_mode(evidence):
+        return _peacock_value_match(row, actual, "Buying type")
     if _is_blank(actual):
         return _review(
             row, "Buying type not available in BigQuery; verify manually."

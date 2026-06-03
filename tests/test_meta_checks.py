@@ -169,6 +169,47 @@ def test_buying_type_reservation_vs_auction_is_fix() -> None:
     assert result.verdict == "Fix"
 
 
+# --- Peacock-mode vocabulary (objective + buying_type) ---------------------
+# In Peacock mode both sides are Peacock's own vocab (Acquisition / Biddable),
+# compared directly — no Meta-enum mapping.
+
+
+def _peacock_ev(campaign: dict) -> dict:
+    return {"campaign": campaign, "peacock_mode": True}
+
+
+def test_objective_peacock_mode_direct_match_passes() -> None:
+    row = _row("campaign_objective", "Acquisition")
+    result = check_campaign_objective(row, evidence=_peacock_ev({"objective": "Acquisition"}))
+    assert result.verdict == "Pass"
+
+
+def test_objective_peacock_mode_mismatch_is_fix() -> None:
+    row = _row("campaign_objective", "Awareness")
+    result = check_campaign_objective(row, evidence=_peacock_ev({"objective": "Acquisition"}))
+    assert result.verdict == "Fix"
+
+
+def test_objective_peacock_mode_blank_actual_is_review() -> None:
+    row = _row("campaign_objective", "Acquisition")
+    result = check_campaign_objective(row, evidence=_peacock_ev({}))
+    assert result.verdict == "Review"
+
+
+def test_buying_type_peacock_mode_biddable_passes() -> None:
+    row = _row("campaign_buying_type", "Biddable")
+    result = check_campaign_buying_type(row, evidence=_peacock_ev({"buying_type": "Biddable"}))
+    assert result.verdict == "Pass"
+
+
+def test_objective_standard_mode_unchanged_for_peacock_vocab() -> None:
+    """Guard: outside Peacock mode, Peacock's vocab ('Acquisition') is still an
+    unrecognized Meta objective → Review (standard behavior unchanged)."""
+    row = _row("campaign_objective", "Acquisition")
+    result = check_campaign_objective(row, evidence=_evidence({"objective": "OUTCOME_SALES"}))
+    assert result.verdict == "Review"
+
+
 # --- campaign_budget -------------------------------------------------------
 # BigQuery stores budgets in minor units (cents): daily_budget=200000 → $2,000.
 

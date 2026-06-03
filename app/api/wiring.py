@@ -104,6 +104,11 @@ def build_orchestration_service(settings: Settings) -> SocialQAOrchestrationServ
         check_runner=run_check,
         gemini_client=build_gemini_client(settings),
         qa_initial=settings.qa_bot_initial,
+        peacock_client_ids=(
+            frozenset({settings.qa_peacock_client_id})
+            if settings.qa_peacock_client_id
+            else frozenset()
+        ),
     )
 
 
