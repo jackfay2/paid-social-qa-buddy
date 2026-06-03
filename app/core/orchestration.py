@@ -52,6 +52,9 @@ class OrchestrationRequest:
     sheet_url: str = ""
     thread_ts: str = ""
     channel_id: str = ""
+    # Explicit Peacock trigger (the builder put "Peacock" in the @-mention). Forces
+    # the Peacock data path + vocabulary regardless of account resolution.
+    peacock: bool = False
 
 
 @dataclass
@@ -172,14 +175,21 @@ class SocialQAOrchestrationService:
         # 2. Resolve account_id -> client_id (the BQ dataset selector).
         record.status = "validating"
         self.run_store.update_run(record)
-        try:
-            client_id = self.resolver.resolve_client_id(request.account_id)
-        except Exception as exc:  # noqa: BLE001 — convert to a clean terminal result
-            return self._fail(
-                record,
-                f"Couldn't resolve the account to a client: {exc}",
-                "account_resolution_failed",
-            )
+        # Explicit "Peacock" trigger: route straight to the Peacock client,
+        # bypassing account resolution (Peacock's current campaigns may not map
+        # to a resolvable Meta account). Falls back to normal resolution if no
+        # Peacock client is configured.
+        if request.peacock and self.peacock_client_ids:
+            client_id = sorted(self.peacock_client_ids)[0]
+        else:
+            try:
+                client_id = self.resolver.resolve_client_id(request.account_id)
+            except Exception as exc:  # noqa: BLE001 — convert to a clean terminal result
+                return self._fail(
+                    record,
+                    f"Couldn't resolve the account to a client: {exc}",
+                    "account_resolution_failed",
+                )
         if not client_id:
             return self._reject(
                 record,

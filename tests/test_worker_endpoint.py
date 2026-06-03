@@ -162,6 +162,44 @@ def test_json_null_field_coerced_not_422(monkeypatch) -> None:
     assert captured["account_id"] == ""
 
 
+def _capture_field(monkeypatch, field: str):
+    captured = {}
+
+    def fake_build(settings):
+        service = MagicMock()
+        service.run_store = MagicMock()
+
+        def _run(req):
+            captured["val"] = getattr(req, field)
+            return _completed_result()
+
+        service.run.side_effect = _run
+        return service
+
+    monkeypatch.setattr(wiring, "build_orchestration_service", fake_build)
+    monkeypatch.setattr(wiring, "build_slack_client", lambda s: None)
+    return captured
+
+
+def test_peacock_flag_passed_through(monkeypatch) -> None:
+    captured = _capture_field(monkeypatch, "peacock")
+    response = _client().post("/tasks/qa/run", json={**_PAYLOAD, "peacock": True})
+    assert response.status_code == 200
+    assert captured["val"] is True
+
+
+def test_peacock_defaults_false_and_null_safe(monkeypatch) -> None:
+    captured = _capture_field(monkeypatch, "peacock")
+    # omitted -> False
+    _client().post("/tasks/qa/run", json=_PAYLOAD)
+    assert captured["val"] is False
+    # JSON null -> False (not a 422)
+    captured2 = _capture_field(monkeypatch, "peacock")
+    r = _client().post("/tasks/qa/run", json={**_PAYLOAD, "peacock": None})
+    assert r.status_code == 200
+    assert captured2["val"] is False
+
+
 # --- Slack behavior --------------------------------------------------------
 
 

@@ -139,6 +139,7 @@ def qa_run_task(payload: SocialTaskRequest, request: Request) -> SocialTaskRespo
         sheet_url=payload.sheet_url,
         thread_ts=payload.thread_ts,
         channel_id=payload.channel_id,
+        peacock=payload.peacock,
     )
 
     result = _run_with_timeout(

@@ -17,12 +17,14 @@ class SocialTaskRequest(BaseModel):
 
     @field_validator("*", mode="before")
     @classmethod
-    def _none_to_empty(cls, value: object) -> object:
-        """A JSON null for any string field would otherwise 422 at validation
-        (before the handler runs), bypassing the graceful "missing field" reject
-        that posts a user-visible message to Slack. Collapse null → "" so a null
-        id flows into that same reject path instead of a silent 422."""
-        return "" if value is None else value
+    def _none_to_empty(cls, value: object, info) -> object:
+        """A JSON null for any field would otherwise 422 at validation (before the
+        handler runs), bypassing the graceful "missing field" reject that posts a
+        user-visible message to Slack. Collapse null → "" for string fields (so a
+        null id flows into that reject path) and null → False for the bool flag."""
+        if value is None:
+            return False if info.field_name == "peacock" else ""
+        return value
 
     request_id: str = ""
     channel_id: str = ""
@@ -35,6 +37,9 @@ class SocialTaskRequest(BaseModel):
     campaign_id: str = ""
     campaign_name: str = ""
     qa_app: str = "social"
+    # The listener sets this when the builder puts "Peacock" in the @-mention —
+    # forces the Peacock data path + vocabulary regardless of account resolution.
+    peacock: bool = False
 
 
 class SocialTaskResponse(BaseModel):
