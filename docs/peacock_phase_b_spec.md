@@ -1,6 +1,7 @@
 # Peacock Mode — Phase B spec (the trafficking table)
 
-**Status:** Phase B **v1 SHIPPED** 2026-06-03 (code + tests; not yet deployed).
+**Status:** Phase B **v1 SHIPPED + DEPLOYED** 2026-06-03 (commit `64f73e8`,
+test worker rev `00019-6x2`, `/readyz` 200; SA confirmed reading `AirTable_v2`).
 Grounded in live inspection of `nbc-287716.AirTable_v2.wp_live_trafficking`
 (197 cols, the Airtable trafficking mirror). **UNBLOCKED** — join confirmed
 (§6.1): perf `DistributionID` ↔ trafficking `Distribution_` (verified 5/5, then
