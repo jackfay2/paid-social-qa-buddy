@@ -49,6 +49,13 @@ _OUTPUT_OPTIONAL_ALIASES = {
 _REQUIRED_ALIASES = {**_INPUT_REQUIRED_ALIASES, **_OUTPUT_REQUIRED_ALIASES}
 _OPTIONAL_ALIASES = {**_INPUT_OPTIONAL_ALIASES, **_OUTPUT_OPTIONAL_ALIASES}
 
+# Normalized check_id-cell values that are actually REPEATED section headers, not
+# checks. The Social template restarts each section (Campaign / Ad Set / Ad) with
+# its own "Check_ID" header row; parse_check_rows must skip those — otherwise they
+# parse as check_id="Check_ID" -> "Error: Unrecognized" (spurious Errors, and the
+# verdict gets written onto the header row). Covers "Check_ID"/"Check ID"/"CheckID".
+_CHECK_ID_HEADER_TOKENS = {"check id", "checkid"}
+
 
 class SheetTemplateError(Exception):
     """Raised when the sheet doesn't contain the expected header columns."""
@@ -133,6 +140,9 @@ def parse_check_rows(table_rows: list[list[str]]) -> list[CheckRow]:
         check_col = headers["check_id"]
         check_id = item[check_col].strip() if check_col < len(item) else ""
         if not check_id:
+            continue
+        # Skip a repeated section header ("Check_ID") — it's not a check.
+        if normalize_header(check_id) in _CHECK_ID_HEADER_TOKENS:
             continue
 
         def _cell(key: str) -> str:

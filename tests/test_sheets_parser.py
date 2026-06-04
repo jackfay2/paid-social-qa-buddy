@@ -69,6 +69,24 @@ def test_parse_check_rows_basic() -> None:
     assert rows[1].row_index == 3
 
 
+def test_parse_check_rows_skips_repeated_section_headers() -> None:
+    """The multi-section Meta template restarts each section with its own
+    "Check_ID" header row. Those must NOT parse as a check_id="Check_ID" row
+    (which would become 'Error: Unrecognized' and write onto the header row)."""
+    table = [
+        _HEADER,
+        ["campaign_objective", "objective", "", "Campaign Objective", "Sales", "", "", ""],
+        # ad-set section restarts with another header row
+        ["Check_ID", "facebook_ads__adsets", "", "Ad Set Level", "Builder Input", "Builder Notes", "Pass or Fix", "Action"],
+        ["adset_status", "effective_status", "", "Ad Set Status", "Active", "", "", ""],
+        # ad section restarts again (CheckID variant)
+        ["CheckID", "facebook_ads__ads", "", "Ad Level", "Builder Input", "Builder Notes", "Pass or Fix", "Action"],
+        ["ad_status", "effective_status", "", "Ad Status", "Active", "", "", ""],
+    ]
+    rows = parse_check_rows(table)
+    assert [r.check_id for r in rows] == ["campaign_objective", "adset_status", "ad_status"]
+
+
 def test_parse_check_rows_skips_rows_without_check_id() -> None:
     table = [
         _HEADER,
