@@ -54,22 +54,15 @@ ALWAYS_REVIEW_CHECK_ACTIONS: dict[str, str] = {
         "Manager / Editor before building (or note 'Built in platform')."
     ),
     # Template marks this row MANUAL — creative dimensions can't be verified
-    # from BigQuery fields reliably.
+    # from BigQuery fields reliably (standard clients; Peacock automates via
+    # trafficking Frame_Size, see PEACOCK_DETERMINISTIC_CHECK_IDS).
     "ad_creative_dimensions": (
         "Manual check: verify the 1x1 and 9x16 creative are present and correct "
         "in Ads Manager."
     ),
-    # Naming conventions are MANUAL by Kerri's call (2026-06-02): conventions
-    # vary slightly by account/client, so a single auto rule would be too
-    # brittle — the bot flags for a human instead of guessing.
-    "adset_name_conventions": (
-        "Manual check: confirm the ad set name follows this client's naming "
-        "convention (varies by account — verify in Ads Manager)."
-    ),
-    "ad_name_conventions": (
-        "Manual check: confirm the ad name follows this client's naming "
-        "convention (varies by account — verify in Ads Manager)."
-    ),
+    # NOTE: naming conventions (adset/ad) were here, but Kerri approved automating
+    # them (2026-06-04): the builder enters the expected name/components and the
+    # bot verifies — now real checks in the registry, no longer manual.
 }
 
 # Check_ids that are manual Review for standard clients but become DETERMINISTIC
@@ -109,34 +102,10 @@ def build_summary(results: list[CheckResult]) -> RunSummary:
 def _manual_review_context(check_id: str, evidence: dict[str, Any] | None) -> str:
     """Enrich a manual-by-design Review with the actual values we already have, so
     the reviewer gets a head start instead of a generic instruction. Empty when
-    there's nothing useful to add."""
+    there's nothing useful to add. (Naming conventions are now automated checks,
+    so the only manual check with useful context here is creative dimensions.)"""
     if not isinstance(evidence, dict):
         return ""
-
-    def _names(items: object, keys: tuple[str, ...]) -> list[str]:
-        out: list[str] = []
-        if isinstance(items, list):
-            for it in items:
-                if isinstance(it, dict):
-                    nm = next((it.get(k) for k in keys if it.get(k)), None)
-                    if nm:
-                        out.append(str(nm))
-        return out
-
-    def _show(names: list[str]) -> str:
-        uniq = list(dict.fromkeys(names))  # dedupe, keep order
-        if not uniq:
-            return ""
-        head = ", ".join(uniq[:3])
-        more = f" (+{len(uniq) - 3} more)" if len(uniq) > 3 else ""
-        return head + more
-
-    if check_id == "adset_name_conventions":
-        shown = _show(_names(evidence.get("ad_sets"), ("name", "adset_name")))
-        return f" Ad set name(s): {shown}." if shown else ""
-    if check_id == "ad_name_conventions":
-        shown = _show(_names(evidence.get("ads"), ("name", "ad_name")))
-        return f" Ad name(s): {shown}." if shown else ""
     if check_id == "ad_creative_dimensions":
         ads = evidence.get("ads")
         n = len(ads) if isinstance(ads, list) else 0

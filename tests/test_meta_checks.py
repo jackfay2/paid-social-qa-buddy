@@ -10,6 +10,7 @@ from app.checks.meta_checks import (
     check_ad_creative_dimensions,
     check_ad_destination_url,
     check_ad_flight_window,
+    check_ad_name_conventions,
     check_ad_status,
     check_adset_age_max,
     check_adset_age_min,
@@ -20,6 +21,7 @@ from app.checks.meta_checks import (
     check_adset_countries,
     check_adset_end_date,
     check_adset_genders,
+    check_adset_name_conventions,
     check_adset_optimization_goal,
     check_adset_placements,
     check_adset_spend_maximum,
@@ -1768,3 +1770,50 @@ def test_review_context_empty_when_nothing_known() -> None:
     result = check_adset_conversion_event(_row("adset_conversion_event", "Purchase"), evidence=ev)
     assert result.verdict == "Review"
     assert "Known:" not in result.action
+
+
+# --- naming conventions (Kerri-approved automation 2026-06-04) --------------
+
+
+def test_adset_name_conventions_pass_when_all_contain_components() -> None:
+    ev = _adset_evidence([{"name": "Peacock_FBIG_ACQ_2501"}, {"name": "Peacock_FBIG_WIN_2402"}])
+    result = check_adset_name_conventions(_row("adset_name_conventions", "Peacock, FBIG"), evidence=ev)
+    assert result.verdict == "Pass"
+
+
+def test_adset_name_conventions_fix_when_a_name_misses_a_component() -> None:
+    ev = _adset_evidence([{"name": "Peacock_FBIG_ACQ"}, {"name": "Generic_TikTok_ACQ"}])
+    result = check_adset_name_conventions(_row("adset_name_conventions", "Peacock, FBIG"), evidence=ev)
+    assert result.verdict == "Fix"
+    assert "Generic_TikTok_ACQ" in result.action and "Peacock" in result.action
+
+
+def test_name_convention_matches_on_token_boundary() -> None:
+    ev = _adset_evidence([{"name": "Brand_ACQ_2501"}])
+    assert check_adset_name_conventions(_row("adset_name_conventions", "ACQ"), evidence=ev).verdict == "Pass"
+
+
+def test_name_convention_no_false_positive_inside_larger_token() -> None:
+    # "ACQ" must NOT match inside "ACQUIRED" (boundary-aware) -> genuinely absent -> Fix.
+    ev = _adset_evidence([{"name": "Brand_ACQUIRED_2501"}])
+    assert check_adset_name_conventions(_row("adset_name_conventions", "ACQ"), evidence=ev).verdict == "Fix"
+
+
+def test_name_convention_handles_mixed_separators() -> None:
+    # Spaces / colons / hyphens all normalize the same.
+    ev = _adset_evidence([{"name": "Post: Auto US 25+ Broad - Next 50"}])
+    assert check_adset_name_conventions(_row("adset_name_conventions", "Auto, US, Broad"), evidence=ev).verdict == "Pass"
+
+
+def test_name_convention_review_when_input_unparseable() -> None:
+    ev = _adset_evidence([{"name": "Brand_ACQ"}])
+    assert check_adset_name_conventions(_row("adset_name_conventions", "   "), evidence=ev).verdict == "Review"
+
+
+def test_name_convention_review_when_no_entities() -> None:
+    assert check_adset_name_conventions(_row("adset_name_conventions", "Peacock"), evidence=_adset_evidence([])).verdict == "Review"
+
+
+def test_ad_name_conventions_pass() -> None:
+    ev = _ad_evidence([{"name": "2501_video_signup_acq"}, {"name": "2502_image_signup_acq"}])
+    assert check_ad_name_conventions(_row("ad_name_conventions", "signup, acq"), evidence=ev).verdict == "Pass"

@@ -2201,3 +2201,103 @@ def check_adset_audience_exclusions(row: CheckRow, *, evidence: dict[str, Any] |
         verifiable_fn=lambda a: _targeting_synced(a, "excluded_custom_audiences"),
         label="audience exclusions",
     )
+
+
+# === Naming conventions (Kerri-approved automation, 2026-06-04) ==============
+#
+# Kerri's option #1: the builder enters the expected name (or the key name
+# components, comma-separated) in the sheet, and the bot confirms every ad set /
+# ad name CONTAINS them. This sidesteps the "conventions vary by client" concern
+# (the builder supplies the expectation per campaign) — was previously manual.
+#
+# Matching is boundary-aware to avoid false positives: names are normalized by
+# collapsing every non-alphanumeric run to a single space, then each component
+# must appear delimited by token boundaries — so "acq" matches in
+# "Peacock_FBIG_ACQ_..." but NOT inside "acquired". Cardinal-safe: a Fix means a
+# component is genuinely absent (no false Fix from a boundary miss → that path is
+# a real absence); blank builder input → N/A (handled in the pipeline).
+
+_NAME_NONALNUM_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _normalize_name(value: Any) -> str:
+    """Lowercase + collapse every non-alphanumeric run to a single space."""
+    return _NAME_NONALNUM_RE.sub(" ", str(value or "").lower()).strip()
+
+
+def _name_components(value: Any) -> list[tuple[str, str]]:
+    """Parse builder input into (original, normalized) components. Comma-separated
+    when commas are present; otherwise the whole string is one component."""
+    raw = str(value or "")
+    parts = raw.split(",") if "," in raw else [raw]
+    out: list[tuple[str, str]] = []
+    for part in parts:
+        norm = _normalize_name(part)
+        if norm:
+            out.append((part.strip(), norm))
+    return out
+
+
+def _component_present(component_norm: str, name_norm: str) -> bool:
+    """True if the normalized component appears in the normalized name on token
+    boundaries (not as a substring of a larger token)."""
+    pattern = r"(?<!\w)" + re.escape(component_norm) + r"(?!\w)"
+    return re.search(pattern, name_norm) is not None
+
+
+def _check_name_convention(
+    row: CheckRow,
+    *,
+    entities: list[dict[str, Any]],
+    label: str,
+    name_keys: tuple[str, ...],
+) -> CheckResult:
+    if not entities:
+        return _review(row, f"No {label}s found in BigQuery for this campaign.")
+
+    components = _name_components(row.builder_input)
+    if not components:
+        return _review(
+            row,
+            f'Could not interpret the expected {label} name "{row.builder_input}". '
+            "Enter the expected name or its key components (comma-separated).",
+        )
+
+    missing: list[tuple[str, str]] = []   # (name, missing original component)
+    unnamed = 0
+    for entity in entities:
+        name = next((entity.get(k) for k in name_keys if entity.get(k)), None)
+        if _is_blank(name):
+            unnamed += 1
+            continue
+        name_norm = _normalize_name(name)
+        for original, norm in components:
+            if not _component_present(norm, name_norm):
+                missing.append((str(name), original))
+                break
+
+    if missing:
+        name, comp = missing[0]
+        more = f" (+{len(missing) - 1} more)" if len(missing) > 1 else ""
+        return _fix(
+            row,
+            f'{label.capitalize()} name "{name}" is missing expected "{comp}"{more}.',
+        )
+    if unnamed == len(entities):
+        return _review(
+            row, f"No {label} names available in BigQuery; verify manually."
+        )
+    expected = ", ".join(original for original, _ in components)
+    return _pass(row, f"All {label} names include: {expected}.")
+
+
+def check_adset_name_conventions(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
+    return _check_name_convention(
+        row, entities=_ad_sets(evidence), label="ad set", name_keys=("name", "adset_name")
+    )
+
+
+def check_ad_name_conventions(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
+    return _check_name_convention(
+        row, entities=_ads(evidence), label="ad", name_keys=("name", "ad_name")
+    )

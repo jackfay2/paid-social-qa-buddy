@@ -130,24 +130,14 @@ def test_ad_creative_dimensions_peacock_routes_to_registry() -> None:
     assert peacock[0].verdict == "Pass"
 
 
-def test_name_convention_checks_are_manual_review() -> None:
-    """Kerri's call (2026-06-02): naming conventions vary by client, so the
-    ad-set and ad name checks are MANUAL — always Review with instructions,
-    never an auto-guess, even when the builder filled in 'Yes'."""
+def test_name_convention_checks_route_to_registry() -> None:
+    """Kerri approved automating naming (2026-06-04): no longer manual. With a
+    builder-entered expectation the rows route to the registry runner (here the
+    passing stub), instead of the fixed manual-Review note."""
     for check_id in ("adset_name_conventions", "ad_name_conventions"):
-        rows = [_row(check_id, builder_input="Yes")]
+        rows = [_row(check_id, builder_input="Peacock_ACQ")]
         results = execute_checks(rows, _passing_runner)
-        assert results[0].verdict == "Review", check_id
-        assert "naming convention" in results[0].action.lower(), check_id
-
-
-def test_manual_naming_review_surfaces_actual_names() -> None:
-    """Enrichment: the manual naming Review includes the actual name(s) so the
-    reviewer doesn't have to open Ads Manager to see them."""
-    ev = {"campaign": {}, "ad_sets": [{"name": "Peacock_FBIG_ACQ_2501"}], "ads": []}
-    results = execute_checks([_row("adset_name_conventions", "Yes")], _passing_runner, evidence=ev)
-    assert results[0].verdict == "Review"
-    assert "Peacock_FBIG_ACQ_2501" in results[0].action
+        assert results[0].verdict == "Pass", check_id  # routed to runner, not manual Review
 
 
 def test_manual_dimensions_review_surfaces_ad_count() -> None:
@@ -158,10 +148,11 @@ def test_manual_dimensions_review_surfaces_ad_count() -> None:
 
 
 def test_manual_review_context_safe_without_evidence() -> None:
-    # No evidence -> base instruction unchanged, no crash.
-    results = execute_checks([_row("ad_name_conventions", "Yes")], _passing_runner)
+    # No evidence -> base instruction unchanged, no crash (creative_dimensions is
+    # still a manual-by-design check).
+    results = execute_checks([_row("ad_creative_dimensions", "")], _passing_runner)
     assert results[0].verdict == "Review"
-    assert "naming convention" in results[0].action.lower()
+    assert "manual" in results[0].action.lower()
 
 
 def test_execute_checks_force_run_overrides_na(monkeypatch) -> None:

@@ -17,6 +17,7 @@ from app.checks.meta_checks import (
     check_ad_creative_dimensions,
     check_ad_destination_url,
     check_ad_flight_window,
+    check_ad_name_conventions,
     check_ad_status,
     check_adset_age_max,
     check_adset_age_min,
@@ -27,6 +28,7 @@ from app.checks.meta_checks import (
     check_adset_countries,
     check_adset_end_date,
     check_adset_genders,
+    check_adset_name_conventions,
     check_adset_optimization_goal,
     check_adset_placements,
     check_adset_spend_maximum,
@@ -80,6 +82,10 @@ CHECK_REGISTRY: dict[str, CheckFunction] = {
     # Placements: Peacock has AirTable_Placement (Stories/Reels/In-Feed/Creator)
     # aggregated onto the ad set; standard clients have no data -> Review.
     "adset_placements": check_adset_placements,
+    # Naming conventions (Kerri-approved automation 2026-06-04): builder enters the
+    # expected name / key components; bot confirms each name contains them. Was
+    # manual; blank input still → N/A (no longer force-manual).
+    "adset_name_conventions": check_adset_name_conventions,
     # Ad level. Destination URL read defensively across several BQ schemas
     # (link_url, destination_url, creative.link_url, object_story_spec.link).
     "ad_status": check_ad_status,
@@ -94,6 +100,7 @@ CHECK_REGISTRY: dict[str, CheckFunction] = {
     # Peacock QC surface: the trafficking table's pre-computed flight-window flag.
     # No builder input -> ALWAYS_RUN. Peacock-only; standard clients -> Review.
     "ad_flight_window": check_ad_flight_window,
+    "ad_name_conventions": check_ad_name_conventions,
     # Text checks (Gemini): defined in app/checks/text_checks.py, NOT here.
     # The pipeline skips text-check rows in execute_checks and routes them
     # through execute_text_checks. Adding a text check is a TEXT_CHECK_DEFINITIONS
