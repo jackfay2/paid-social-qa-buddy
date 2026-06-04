@@ -1702,3 +1702,44 @@ def test_adset_start_date_standard_mismatch_still_fixes() -> None:
     # Non-Peacock keeps the confident Fix on a date mismatch.
     ev = {"campaign": {}, "ad_sets": [{"name": "as1", "start_time": "2025-11-24"}], "ads": []}
     assert check_adset_start_date(_row("adset_start_date", "06/01/2026"), evidence=ev).verdict == "Fix"
+
+
+# --- ad_destination_url: domain mode (Lever 1) -----------------------------
+
+
+def test_destination_url_domain_mode_passes_across_unique_urls() -> None:
+    """A bare-domain expectation matches every ad by host, even when each ad's
+    full tracking URL is unique (Peacock's per-creative cid/utm scheme)."""
+    ads = [
+        {"id": "1", "creative": {"link_url": "https://www.peacocktv.com/?cid=abc&utm_x=1"}},
+        {"id": "2", "creative": {"link_url": "https://www.peacocktv.com/stream/show?cid=def"}},
+        {"id": "3", "creative": {"link_url": "https://peacocktv.com/?gid=2"}},
+    ]
+    result = check_ad_destination_url(_row("ad_destination_url", "peacocktv.com"), evidence=_ad_evidence(ads))
+    assert result.verdict == "Pass"
+    assert "peacocktv.com" in result.action
+
+
+def test_destination_url_domain_mode_strips_www_both_sides() -> None:
+    ads = [{"id": "1", "creative": {"link_url": "https://peacocktv.com/x"}}]
+    result = check_ad_destination_url(_row("ad_destination_url", "www.peacocktv.com"), evidence=_ad_evidence(ads))
+    assert result.verdict == "Pass"
+
+
+def test_destination_url_domain_mode_fixes_wrong_domain() -> None:
+    ads = [
+        {"id": "1", "creative": {"link_url": "https://www.peacocktv.com/?cid=1"}},
+        {"id": "2", "creative": {"link_url": "https://example.com/landing"}},
+    ]
+    result = check_ad_destination_url(_row("ad_destination_url", "peacocktv.com"), evidence=_ad_evidence(ads))
+    assert result.verdict == "Fix"
+    assert "example.com" in result.action
+
+
+def test_destination_url_full_url_still_exact() -> None:
+    # A full-URL expectation keeps exact comparison — a differing query Fixes.
+    ads = [{"id": "1", "creative": {"link_url": "https://www.peacocktv.com/?cid=1"}}]
+    result = check_ad_destination_url(
+        _row("ad_destination_url", "https://www.peacocktv.com/?cid=2"), evidence=_ad_evidence(ads)
+    )
+    assert result.verdict == "Fix"

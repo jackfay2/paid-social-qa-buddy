@@ -1275,6 +1275,31 @@ def _normalize_url(value: Any) -> str:
     return urlunsplit((scheme, netloc, path, parts.query, parts.fragment))
 
 
+def _is_bare_domain(normalized_url: str) -> bool:
+    """True when a normalized URL is just a domain — no path, query, or fragment.
+    Signals the builder is asserting the destination DOMAIN, not an exact link
+    (e.g. "peacocktv.com"), so the check compares hosts instead of full URLs.
+    Peacock's per-creative tracking URLs are all unique but share one domain, so
+    full-URL comparison never matches while a domain check is meaningful + passable."""
+    if not normalized_url:
+        return False
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(normalized_url)
+    return not parts.query and not parts.fragment and parts.path in ("", "/")
+
+
+def _url_host(normalized_url: str) -> str:
+    """Comparable host of a normalized URL, with a leading 'www.' dropped so
+    'www.peacocktv.com' and 'peacocktv.com' match. '' if unparseable."""
+    if not normalized_url:
+        return ""
+    from urllib.parse import urlsplit
+
+    host = urlsplit(normalized_url).netloc.lower()
+    return host[4:] if host.startswith("www.") else host
+
+
 def check_ad_destination_url(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
     ads = _ads(evidence)
     if not ads:
@@ -1286,6 +1311,11 @@ def check_ad_destination_url(row: CheckRow, *, evidence: dict[str, Any] | None =
             row,
             f'Could not parse the expected destination URL "{row.builder_input}".',
         )
+
+    # If the builder entered a bare domain ("peacocktv.com"), compare by host;
+    # if they entered a full URL, compare exactly. Inferred from the input shape.
+    domain_mode = _is_bare_domain(expected_norm)
+    expected_host = _url_host(expected_norm)
 
     mismatched: list[tuple[str, str]] = []
     missing: list[str] = []
@@ -1301,16 +1331,19 @@ def check_ad_destination_url(row: CheckRow, *, evidence: dict[str, Any] | None =
             # rather than emit a false Fix on a parser quirk.
             missing.append(_ad_label(ad))
             continue
-        if actual_norm != expected_norm:
+        if domain_mode:
+            if _url_host(actual_norm) != expected_host:
+                mismatched.append((_ad_label(ad), raw))
+        elif actual_norm != expected_norm:
             mismatched.append((_ad_label(ad), raw))
 
     if mismatched:
         first_label, first_actual = mismatched[0]
         more = f" (+{len(mismatched) - 1} more)" if len(mismatched) > 1 else ""
+        target = f"domain {expected_host}" if domain_mode else f'"{row.builder_input}"'
         return _fix(
             row,
-            f'Expected "{row.builder_input}", but {first_label} points to '
-            f'"{first_actual}"{more}',
+            f'Expected {target}, but {first_label} points to "{first_actual}"{more}',
         )
     if missing:
         if len(missing) == len(ads):
@@ -1319,6 +1352,8 @@ def check_ad_destination_url(row: CheckRow, *, evidence: dict[str, Any] | None =
                 "Destination URL not available in BigQuery for any ad; verify manually.",
             )
         return _pass(row, f"({len(missing)} of {len(ads)} ads missing destination URL)")
+    if domain_mode:
+        return _pass(row, f"All ads point to {expected_host}.")
     return _pass(row)
 
 
