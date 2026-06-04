@@ -72,6 +72,17 @@ def test_parses_verdicts_above_threshold() -> None:
     assert result["headline_spelling"]["action"] == "typo"
 
 
+def test_generation_config_pins_temperature_zero() -> None:
+    """Spelling must be reproducible: pin temperature=0 (greedy decoding) so the
+    same copy yields the same verdict run-to-run. At the default (~1.0) the same
+    ad flipped Pass<->Review across runs (measured + fixed 2026-06-04)."""
+    client = _client(_gemini_response({"ad_copy_spelling": {"verdict": "Pass", "confidence": 0.95, "reason": "clean"}}))
+    client.run_text_checks(_BATCH)
+    config = client._http.post.call_args.kwargs["json"]["generationConfig"]
+    assert config["temperature"] == 0
+    assert config["topP"] == 1
+
+
 def test_low_confidence_becomes_review() -> None:
     response = _gemini_response(
         {

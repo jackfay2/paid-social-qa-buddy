@@ -93,7 +93,17 @@ class GeminiClient:
 
         prompt = self._build_prompt(batch)
         # Force raw JSON output so we don't have to strip markdown fences.
-        generation_config: dict[str, Any] = {"responseMimeType": "application/json"}
+        # temperature=0 -> greedy decoding for reproducibility. Spelling is a
+        # deterministic yes/no judgment; at the default (~1.0) the SAME copy
+        # flipped Pass<->Review run-to-run (measured 2026-06-04), which erodes
+        # trust in a tool meant to replace human review. topP=1 keeps the greedy
+        # pick unconstrained. Variance was already Pass<->Review (never a false
+        # Fix) thanks to the fail-safe; this removes the inconsistency itself.
+        generation_config: dict[str, Any] = {
+            "responseMimeType": "application/json",
+            "temperature": 0,
+            "topP": 1,
+        }
         # gemini-2.5-* models run "thinking" by default, which roughly triples
         # latency (a 46-item batch took ~37s vs ~6s) and burns extra tokens for
         # no quality gain on these narrow yes/no spelling judgments. Disable it.
