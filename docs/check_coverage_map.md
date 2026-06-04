@@ -35,7 +35,7 @@ design · 〰️ conditional · 🦚 Peacock-mode behavior
 | adset_optimization_goal | optimization goal | `optimization_goal` | ⚠️ ~2/5; enriched Review |
 | adset_attribution_setting | attribution window | `attribution_spec` | ⚠️ ~2/5; enriched Review |
 | adset_spend_minimum / maximum | spend floor / cap present | `daily_min_spend_target`/`daily_spend_cap` | ⚠️ ~2/5 · ALWAYS_RUN |
-| adset_name_conventions | name follows convention | (the name) | ✋ manual (Kerri); enriched with actual name(s) |
+| adset_name_conventions | name contains expected components | the ad set `name` | ✅ builder enters expected name/components; bot confirms each name contains them (boundary-aware) — Kerri approved 2026-06-04 |
 
 ## Ad level
 | check_id | verifies | source | status |
@@ -46,7 +46,7 @@ design · 〰️ conditional · 🦚 Peacock-mode behavior
 | ad_call_to_action | CTA button | `call_to_action_type` / `CTABundle` | ✅ |
 | ad_creative_dimensions | 1x1 / 9x16 present | `Frame_Size` (Peacock) | 🦚 Peacock ✅ · standard ✋ manual (dims unreliable in BQ); enriched with ad count |
 | ad_flight_window | pre-computed flight QC | `Live_After_End_Date_Warning` (Peacock) | 🦚 Peacock surface · standard Review · ALWAYS_RUN |
-| ad_name_conventions | name follows convention | (the name) | ✋ manual (Kerri); enriched with actual name(s) |
+| ad_name_conventions | name contains expected components | the ad `name` | ✅ same as adset_name_conventions (builder-entered components) |
 
 ## Text checks (Gemini)
 | check_id | verifies | source | status |
@@ -61,9 +61,9 @@ design · 〰️ conditional · 🦚 Peacock-mode behavior
 | download_changes | changes downloaded before building | n/a | ✋ manual (brief-mandated) |
 
 ## Summary
-- **~18 deterministic today** (objective, buying type, statuses, dates, age/gender/geo, audiences, ad count, URL, CTA, copy/headline spelling).
+- **~20 deterministic today** (objective, buying type, statuses, dates, age/gender/geo, audiences, ad count, URL, CTA, copy/headline spelling, **naming conventions** [builder-entered components]).
 - **7 data-gated** (bid strategy, budget, conversion event, optimization goal, attribution, spend min/max) — deterministic *today* for well-synced clients (e.g. C51305634), Review elsewhere; all auto-upgrade when Airbyte syncs the columns (Riley/Nikki). `promoted_object` (conversion event) is the one missing for *every* client — top priority when they have bandwidth.
-- **4 manual by design** (naming x2, creative dimensions [standard], download_changes).
+- **2 manual by design** (creative dimensions [standard only; Peacock automates via Frame_Size], download_changes). Naming conventions moved to automated 2026-06-04 (Kerri approved).
 - **2 conditional** (end date, description spelling).
 - **2 Peacock-mode additions** (placements, flight-window QC).
 
