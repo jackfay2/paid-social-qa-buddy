@@ -116,6 +116,22 @@ def _is_blank(value: Any) -> bool:
     return value is None or str(value).strip() == ""
 
 
+def _known_context(evidence: dict[str, Any] | None) -> str:
+    """A short suffix of campaign facts we DO know, to enrich a Review/manual
+    message when the specific field isn't in the data — so a human reviewer gets a
+    head start instead of a dead end. Empty string when nothing useful is known."""
+    bits: list[str] = []
+    objective = _campaign(evidence).get("objective")
+    if not _is_blank(objective):
+        bits.append(f"objective {objective}")
+    for adset in _ad_sets(evidence):
+        goal = adset.get("optimization_goal")
+        if not _is_blank(goal):
+            bits.append(f"optimization goal {goal}")
+            break
+    return f" Known: {', '.join(bits)}." if bits else ""
+
+
 # --- campaign_objective ----------------------------------------------------
 
 # Meta objective values mapped to the ODAX OUTCOME_* canonical form.
@@ -1804,7 +1820,8 @@ def check_adset_conversion_event(row: CheckRow, *, evidence: dict[str, Any] | No
         if len(missing) == len(ad_sets):
             return _review(
                 row,
-                "Conversion event not available in BigQuery for any ad set; verify manually.",
+                "Conversion event not available in BigQuery for any ad set; verify manually."
+                + _known_context(evidence),
             )
         return _pass(row, f"({len(missing)} of {len(ad_sets)} ad sets missing a conversion event)")
     return _pass(row)
@@ -1927,7 +1944,8 @@ def check_adset_attribution_setting(row: CheckRow, *, evidence: dict[str, Any] |
         if len(missing) == len(ad_sets):
             return _review(
                 row,
-                "Attribution setting not available in BigQuery for any ad set; verify manually.",
+                "Attribution setting not available in BigQuery for any ad set; verify manually."
+                + _known_context(evidence),
             )
         return _pass(row, f"({len(missing)} of {len(ad_sets)} ad sets missing attribution)")
     return _pass(row)
@@ -2018,7 +2036,8 @@ def check_adset_optimization_goal(row: CheckRow, *, evidence: dict[str, Any] | N
         if len(missing) == len(ad_sets):
             return _review(
                 row,
-                "Optimization goal not available in BigQuery for any ad set; verify manually.",
+                "Optimization goal not available in BigQuery for any ad set; verify manually."
+                + _known_context(evidence),
             )
         return _pass(row, f"({len(missing)} of {len(ad_sets)} ad sets missing optimization goal)")
     return _pass(row)

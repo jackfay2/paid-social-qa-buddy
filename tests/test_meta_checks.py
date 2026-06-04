@@ -1743,3 +1743,28 @@ def test_destination_url_full_url_still_exact() -> None:
         _row("ad_destination_url", "https://www.peacocktv.com/?cid=2"), evidence=_ad_evidence(ads)
     )
     assert result.verdict == "Fix"
+
+
+# --- Review enrichment: surface known context on data-gated Reviews ---------
+
+
+def test_conversion_event_review_includes_known_context() -> None:
+    """A data-gated Review surfaces the campaign facts we DO know, so the reviewer
+    has a head start instead of a bare 'not available'."""
+    ev = {
+        "campaign": {"objective": "OUTCOME_SALES"},
+        "ad_sets": [{"name": "as1", "optimization_goal": "OFFSITE_CONVERSIONS"}],
+        "ads": [],
+    }
+    result = check_adset_conversion_event(_row("adset_conversion_event", "Purchase"), evidence=ev)
+    assert result.verdict == "Review"
+    assert "Known: objective OUTCOME_SALES" in result.action
+    assert "optimization goal OFFSITE_CONVERSIONS" in result.action
+
+
+def test_review_context_empty_when_nothing_known() -> None:
+    # No objective / opt goal -> no spurious "Known:" suffix.
+    ev = {"campaign": {}, "ad_sets": [{"name": "as1"}], "ads": []}
+    result = check_adset_conversion_event(_row("adset_conversion_event", "Purchase"), evidence=ev)
+    assert result.verdict == "Review"
+    assert "Known:" not in result.action

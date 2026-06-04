@@ -106,6 +106,44 @@ def build_summary(results: list[CheckResult]) -> RunSummary:
     return summary
 
 
+def _manual_review_context(check_id: str, evidence: dict[str, Any] | None) -> str:
+    """Enrich a manual-by-design Review with the actual values we already have, so
+    the reviewer gets a head start instead of a generic instruction. Empty when
+    there's nothing useful to add."""
+    if not isinstance(evidence, dict):
+        return ""
+
+    def _names(items: object, keys: tuple[str, ...]) -> list[str]:
+        out: list[str] = []
+        if isinstance(items, list):
+            for it in items:
+                if isinstance(it, dict):
+                    nm = next((it.get(k) for k in keys if it.get(k)), None)
+                    if nm:
+                        out.append(str(nm))
+        return out
+
+    def _show(names: list[str]) -> str:
+        uniq = list(dict.fromkeys(names))  # dedupe, keep order
+        if not uniq:
+            return ""
+        head = ", ".join(uniq[:3])
+        more = f" (+{len(uniq) - 3} more)" if len(uniq) > 3 else ""
+        return head + more
+
+    if check_id == "adset_name_conventions":
+        shown = _show(_names(evidence.get("ad_sets"), ("name", "adset_name")))
+        return f" Ad set name(s): {shown}." if shown else ""
+    if check_id == "ad_name_conventions":
+        shown = _show(_names(evidence.get("ads"), ("name", "ad_name")))
+        return f" Ad name(s): {shown}." if shown else ""
+    if check_id == "ad_creative_dimensions":
+        ads = evidence.get("ads")
+        n = len(ads) if isinstance(ads, list) else 0
+        return f" ({n} ad(s) to verify in Ads Manager.)" if n else ""
+    return ""
+
+
 def execute_checks(
     rows: list[CheckRow],
     check_runner: CheckRunner,
@@ -150,7 +188,8 @@ def execute_checks(
                     row_index=row.row_index,
                     check_id=row.check_id,
                     verdict="Review",
-                    action=ALWAYS_REVIEW_CHECK_ACTIONS[row.check_id],
+                    action=ALWAYS_REVIEW_CHECK_ACTIONS[row.check_id]
+                    + _manual_review_context(row.check_id, evidence),
                     builder_input=row.builder_input,
                     builder_notes=row.builder_notes,
                 )

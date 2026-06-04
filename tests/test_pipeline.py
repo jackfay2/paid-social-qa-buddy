@@ -141,6 +141,29 @@ def test_name_convention_checks_are_manual_review() -> None:
         assert "naming convention" in results[0].action.lower(), check_id
 
 
+def test_manual_naming_review_surfaces_actual_names() -> None:
+    """Enrichment: the manual naming Review includes the actual name(s) so the
+    reviewer doesn't have to open Ads Manager to see them."""
+    ev = {"campaign": {}, "ad_sets": [{"name": "Peacock_FBIG_ACQ_2501"}], "ads": []}
+    results = execute_checks([_row("adset_name_conventions", "Yes")], _passing_runner, evidence=ev)
+    assert results[0].verdict == "Review"
+    assert "Peacock_FBIG_ACQ_2501" in results[0].action
+
+
+def test_manual_dimensions_review_surfaces_ad_count() -> None:
+    ev = {"campaign": {}, "ad_sets": [], "ads": [{"id": "1"}, {"id": "2"}]}
+    results = execute_checks([_row("ad_creative_dimensions", "")], _passing_runner, evidence=ev)
+    assert results[0].verdict == "Review"
+    assert "2 ad(s)" in results[0].action
+
+
+def test_manual_review_context_safe_without_evidence() -> None:
+    # No evidence -> base instruction unchanged, no crash.
+    results = execute_checks([_row("ad_name_conventions", "Yes")], _passing_runner)
+    assert results[0].verdict == "Review"
+    assert "naming convention" in results[0].action.lower()
+
+
 def test_execute_checks_force_run_overrides_na(monkeypatch) -> None:
     """A force-run check runs even with blank input."""
     rows = [_row("always_run_check", builder_input="")]
