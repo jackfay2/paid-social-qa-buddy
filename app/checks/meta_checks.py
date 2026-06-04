@@ -2219,6 +2219,12 @@ def check_adset_audience_exclusions(row: CheckRow, *, evidence: dict[str, Any] |
 
 _NAME_NONALNUM_RE = re.compile(r"[^a-z0-9]+")
 
+# Legacy placeholders: these rows used to be manual (builder typed Yes/No). After
+# automation a "Yes"/"No" cell isn't a naming expectation — guard so it degrades to
+# a Review-with-guidance, never a false Fix on "name missing 'yes'". (Blank / N/A /
+# None already become N/A in the pipeline before the check runs.)
+_NAMING_PLACEHOLDER_WORDS = {"yes", "no", "y", "n", "tbd"}
+
 
 def _normalize_name(value: Any) -> str:
     """Lowercase + collapse every non-alphanumeric run to a single space."""
@@ -2261,6 +2267,16 @@ def _check_name_convention(
             row,
             f'Could not interpret the expected {label} name "{row.builder_input}". '
             "Enter the expected name or its key components (comma-separated).",
+        )
+
+    # Transition guard: a legacy Yes/No placeholder (from when this row was manual)
+    # is not a naming expectation. Surface guidance instead of false-Fixing.
+    all_words = [word for _, norm in components for word in norm.split()]
+    if all_words and all(word in _NAMING_PLACEHOLDER_WORDS for word in all_words):
+        return _review(
+            row,
+            f"This {label}-naming row now expects the expected {label} name or its "
+            "key components (comma-separated), not Yes/No — update the row.",
         )
 
     missing: list[tuple[str, str]] = []   # (name, missing original component)

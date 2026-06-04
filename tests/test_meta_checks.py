@@ -1817,3 +1817,13 @@ def test_name_convention_review_when_no_entities() -> None:
 def test_ad_name_conventions_pass() -> None:
     ev = _ad_evidence([{"name": "2501_video_signup_acq"}, {"name": "2502_image_signup_acq"}])
     assert check_ad_name_conventions(_row("ad_name_conventions", "signup, acq"), evidence=ev).verdict == "Pass"
+
+
+def test_name_convention_legacy_yes_no_is_review_not_fix() -> None:
+    """A leftover 'Yes/No' (the old manual placeholder) must NOT false-Fix — it's
+    surfaced as a Review telling the builder to enter the expected name."""
+    ev = _adset_evidence([{"name": "Peacock_FBIG_ACQ"}])
+    for legacy in ("Yes", "No", "Yes/No"):
+        result = check_adset_name_conventions(_row("adset_name_conventions", legacy), evidence=ev)
+        assert result.verdict == "Review", legacy
+        assert "not Yes/No" in result.action
