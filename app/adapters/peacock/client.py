@@ -170,19 +170,54 @@ class PeacockMetaClient:
         }
 
     def get_ad_sets(self, client_id: str, campaign_id: str) -> list[dict[str, Any]]:
-        rows = self._load(campaign_id)
+        """Derive ad sets from the campaign's creatives, aggregating the per-
+        creative audience / placement / flight-window data up to the ad-set level
+        and SHAPING it onto the fields the generic ad-set checks already read:
+          audiences  -> targeting.custom_audiences (presence check)
+          placements -> placements (new placements check)
+          flight     -> start_time / end_time (date checks; peacock = Review on
+                        mismatch, never a false Fix, until Kerri confirms mapping)
+        """
+        enriched = self._enriched(campaign_id)
+        # Only treat audiences as "synced" if the campaign carries ANY audience
+        # data — else a builder "Yes" would falsely Fix on a data gap (cardinal rule).
+        any_audience = any(r.get("audience_names") for r, _ in enriched)
         seen: dict[str, dict[str, Any]] = {}
-        for r in rows:
+        for r, traf in enriched:
             asid = r.get("adset_id")
-            if asid and asid not in seen:
-                seen[asid] = {"adset_id": asid, "name": r.get("adset_name")}
-        return list(seen.values())
+            if not asid:
+                continue
+            a = seen.get(asid)
+            if a is None:
+                a = {"adset_id": asid, "name": r.get("adset_name"),
+                     "placements": [], "_auds": [], "_starts": [], "_ends": []}
+                seen[asid] = a
+            for name in (r.get("audience_names") or []):
+                if name not in a["_auds"]:
+                    a["_auds"].append(name)
+            for placement in (r.get("placements") or []):
+                if placement not in a["placements"]:
+                    a["placements"].append(placement)
+            traf = traf or {}
+            if traf.get("flight_start_date"):
+                a["_starts"].append(traf["flight_start_date"])
+            if traf.get("flight_end_date"):
+                a["_ends"].append(traf["flight_end_date"])
+        out: list[dict[str, Any]] = []
+        for a in seen.values():
+            starts, ends, auds = a.pop("_starts"), a.pop("_ends"), a.pop("_auds")
+            if any_audience:
+                a["targeting"] = {"custom_audiences": auds}
+            if starts:
+                a["start_time"] = min(starts)  # ISO date strings sort chronologically
+            if ends:
+                a["end_time"] = max(ends)
+            out.append(a)
+        return out
 
     def get_ads(self, client_id: str, campaign_id: str) -> list[dict[str, Any]]:
-        rows = self._load(campaign_id)
-        traffic = self._trafficking_lookup(campaign_id)
         ads: list[dict[str, Any]] = []
-        for r in rows:
+        for r, traf in self._enriched(campaign_id):
             headline, body = split_final_copy(r.get("copy"))
             ad: dict[str, Any] = {
                 "id": r.get("creative_id"),
@@ -196,10 +231,11 @@ class PeacockMetaClient:
                     "link_url": r.get("url"),
                     "call_to_action_type": r.get("cta"),
                 },
+                "audience_names": list(r.get("audience_names") or []),
+                "placements": list(r.get("placements") or []),
             }
-            # Phase B: merge the trafficked build-spec for this creative, joined
-            # by distribution id (version number as the documented fallback).
-            traf = self._match_trafficking(traffic, r)
+            # Phase B: the trafficked build-spec for this creative, joined by
+            # distribution id (version number as the documented fallback).
             if traf:
                 ad["trafficking"] = traf
             ads.append(ad)
@@ -235,7 +271,11 @@ class PeacockMetaClient:
               ANY_VALUE(Buy_Type) AS buy_type,
               ANY_VALUE(Campaign) AS campaign_name,
               CAST(ANY_VALUE(DistributionID) AS STRING) AS distribution_id,
-              CAST(ANY_VALUE(VersionNumber) AS STRING) AS version_number
+              CAST(ANY_VALUE(VersionNumber) AS STRING) AS version_number,
+              -- Audience + placement VARY per creative (a creative runs across
+              -- several), so aggregate the DISTINCT set rather than ANY_VALUE.
+              ARRAY_AGG(DISTINCT NULLIF(CAST(AudienceName AS STRING), '') IGNORE NULLS) AS audience_names,
+              ARRAY_AGG(DISTINCT NULLIF(CAST(AirTable_Placement AS STRING), '') IGNORE NULLS) AS placements
             FROM {table}
             WHERE Platform = @platform
               AND CAST(Campaign_ID AS STRING) = @campaign_id
@@ -259,6 +299,15 @@ class PeacockMetaClient:
         )
         self._cache[campaign_id] = result
         return result
+
+    def _enriched(self, campaign_id: str) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+        """Each campaign creative paired with its matched trafficking row.
+
+        Returns [(perf_row, trafficking_dict), ...]. Both get_ads and get_ad_sets
+        build from this so the perf↔trafficking join happens once per creative.
+        """
+        traffic = self._trafficking_lookup(campaign_id)
+        return [(r, self._match_trafficking(traffic, r)) for r in self._load(campaign_id)]
 
     # --- Phase B: trafficking-table merge ---------------------------------
 

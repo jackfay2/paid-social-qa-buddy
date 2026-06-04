@@ -16,6 +16,7 @@ from app.checks.meta_checks import (
     check_ad_count,
     check_ad_creative_dimensions,
     check_ad_destination_url,
+    check_ad_flight_window,
     check_ad_status,
     check_adset_age_max,
     check_adset_age_min,
@@ -27,6 +28,7 @@ from app.checks.meta_checks import (
     check_adset_end_date,
     check_adset_genders,
     check_adset_optimization_goal,
+    check_adset_placements,
     check_adset_spend_maximum,
     check_adset_spend_minimum,
     check_adset_start_date,
@@ -75,6 +77,9 @@ CHECK_REGISTRY: dict[str, CheckFunction] = {
     "adset_spend_maximum": check_adset_spend_maximum,
     "adset_audiences": check_adset_audiences,
     "adset_audience_exclusions": check_adset_audience_exclusions,
+    # Placements: Peacock has AirTable_Placement (Stories/Reels/In-Feed/Creator)
+    # aggregated onto the ad set; standard clients have no data -> Review.
+    "adset_placements": check_adset_placements,
     # Ad level. Destination URL read defensively across several BQ schemas
     # (link_url, destination_url, creative.link_url, object_story_spec.link).
     "ad_status": check_ad_status,
@@ -86,6 +91,9 @@ CHECK_REGISTRY: dict[str, CheckFunction] = {
     # trafficking table carries Frame_Size (the pipeline routes Peacock runs here
     # instead of the manual note — see PEACOCK_DETERMINISTIC_CHECK_IDS).
     "ad_creative_dimensions": check_ad_creative_dimensions,
+    # Peacock QC surface: the trafficking table's pre-computed flight-window flag.
+    # No builder input -> ALWAYS_RUN. Peacock-only; standard clients -> Review.
+    "ad_flight_window": check_ad_flight_window,
     # Text checks (Gemini): defined in app/checks/text_checks.py, NOT here.
     # The pipeline skips text-check rows in execute_checks and routes them
     # through execute_text_checks. Adding a text check is a TEXT_CHECK_DEFINITIONS

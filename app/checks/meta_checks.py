@@ -34,7 +34,6 @@ from typing import Any
 from app.checks._targeting import read_targeting
 from app.models import CheckResult, CheckRow
 
-
 # --- verdict constructors --------------------------------------------------
 
 
@@ -656,6 +655,16 @@ def _check_adset_date_field(
     if mismatched:
         first_label, first_actual = mismatched[0]
         more = f" (+{len(mismatched) - 1} more)" if len(mismatched) > 1 else ""
+        # Peacock: the ad-set date is an aggregate of per-creative flight windows
+        # (min start / max end) and the flight→template-date mapping is unconfirmed
+        # (Kerri). A mismatch is surfaced for review, never a false Fix — Pass only
+        # on an exact match. (Promote to Fix once the date semantics are locked.)
+        if _peacock_mode(evidence):
+            return _review(
+                row,
+                f"Trafficked flight {label} is {first_actual} (expected "
+                f"{expected_date.isoformat()}){more}; confirm against the flight window.",
+            )
         return _fix(
             row,
             f"Expected {label} {expected_date.isoformat()}, "
@@ -1024,6 +1033,71 @@ def check_adset_countries(row: CheckRow, *, evidence: dict[str, Any] | None = No
             )
         return _pass(row, f"({len(missing)} of {len(ad_sets)} ad sets missing countries)")
     return _pass(row)
+
+
+# --- adset_placements (Peacock: AirTable_Placement) ------------------------
+#
+# Peacock carries the delivery placement per creative (Stories / Reels / In-Feed
+# / Creator), aggregated onto each ad set as `placements` by the adapter. Standard
+# clients don't have this in BigQuery -> the check Reviews (no data). Conservative
+# v1: Pass on an exact set match, else Review (placement vocabulary isn't locked
+# with Kerri yet, so we never Fix on a naming variance). Promote to Fix later.
+
+
+def _norm_placement(value: Any) -> str:
+    """Normalize a placement token for comparison: lowercase, drop spaces/hyphens
+    ('In-Feed' / 'in feed' -> 'infeed')."""
+    return "".join(str(value or "").strip().lower().replace("-", "").split())
+
+
+def _parse_placement_set(value: Any) -> set[str]:
+    if value is None:
+        return set()
+    if isinstance(value, (list, tuple)):
+        tokens = [t for t in value if not _is_blank(t)]
+    else:
+        tokens = [t for t in str(value).split(",") if t.strip()]
+    return {_norm_placement(t) for t in tokens if _norm_placement(t)}
+
+
+def check_adset_placements(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
+    ad_sets = _ad_sets(evidence)
+    if not ad_sets:
+        return _review(row, "No ad sets found in BigQuery for this campaign.")
+
+    expected = _parse_placement_set(row.builder_input)
+    if not expected:
+        return _review(
+            row,
+            f'Could not interpret the expected placements "{row.builder_input}". '
+            "Use a comma-separated list (e.g. Stories, Reels, In-Feed).",
+        )
+
+    actual: set[str] = set()
+    raw_actual: list[str] = []
+    have_data = False
+    for adset in ad_sets:
+        placements = adset.get("placements")
+        if isinstance(placements, list) and placements:
+            have_data = True
+            for placement in placements:
+                if not _is_blank(placement):
+                    actual.add(_norm_placement(placement))
+                    raw_actual.append(str(placement))
+
+    if not have_data:
+        return _review(
+            row,
+            "Placements aren't available in the data for this campaign; verify manually.",
+        )
+    sizes = ", ".join(sorted(set(raw_actual)))
+    if expected == actual:
+        return _pass(row, f"Placements match: {sizes}.")
+    return _review(
+        row,
+        f"Trafficked placements are {sizes} (vs expected \"{row.builder_input}\"); "
+        "confirm they match.",
+    )
 
 
 # === Ad-level checks ========================================================
@@ -1523,6 +1597,49 @@ def check_ad_creative_dimensions(row: CheckRow, *, evidence: dict[str, Any] | No
             f"({sizes_str}). Confirm the extra size is intended.",
         )
     return _pass(row, f"Trafficked sizes match {sorted(expected)}: {sizes_str}.")
+
+
+# --- ad_flight_window (Peacock QC surface) ---------------------------------
+#
+# Peacock's trafficking table pre-computes a human-readable flight-window QC flag
+# (`Live_After_End_Date_Warning`: "🚦 All Clear: Live within Flight Window 🚦" vs
+# "‼️ Caution: Approaching End Date ‼️"). This surfaces it directly: all-clear ->
+# Pass, any caution/warning -> Review (never auto-Fix — it's an advisory the
+# builder should eyeball). No builder input needed, so it's ALWAYS_RUN. Peacock-
+# only; standard clients have no such flag -> Review.
+
+_FLIGHT_CLEAR_MARKERS = ("all clear", "within flight", "live within")
+
+
+def check_ad_flight_window(row: CheckRow, *, evidence: dict[str, Any] | None = None) -> CheckResult:
+    if not _peacock_mode(evidence):
+        return _review(
+            row, "Flight-window QC is a Peacock-only check; verify manually."
+        )
+    ads = _ads(evidence)
+    flags: list[str] = []
+    for ad in ads:
+        traf = ad.get("trafficking")
+        flag = traf.get("flight_window_flag") if isinstance(traf, dict) else None
+        if not _is_blank(flag):
+            flags.append(str(flag))
+
+    if not flags:
+        return _review(
+            row,
+            "No trafficking flight-window flag available for this campaign; verify manually.",
+        )
+
+    not_clear = sorted(
+        {f for f in flags if not any(m in f.lower() for m in _FLIGHT_CLEAR_MARKERS)}
+    )
+    if not_clear:
+        more = f" (+{len(not_clear) - 1} more)" if len(not_clear) > 1 else ""
+        return _review(
+            row,
+            f"Trafficking flagged: {not_clear[0]}{more}. Confirm the flight window.",
+        )
+    return _pass(row, "All creatives are flagged live within their flight window.")
 
 
 # === Ad-set level: conversion event (the Peacock-Olympics check) =============

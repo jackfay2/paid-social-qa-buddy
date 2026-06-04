@@ -173,21 +173,24 @@ def test_routing_empty_overrides_all_default() -> None:
 # --- PeacockMetaClient trafficking merge (Phase B) -------------------------
 
 
-def _perf_row(cid: str, dist=None, ver=None, adset: str = "as1") -> dict:
+def _perf_row(cid: str, dist=None, ver=None, adset: str = "as1", auds=None, placements=None) -> dict:
     return {
         "creative_id": cid, "creative_name": f"{cid}_name", "status": "Live",
         "copy": "Headline: H\nBody: B", "url": "https://www.peacocktv.com/x",
         "cta": "Sign Up", "adset_id": adset, "adset_name": "AS",
         "objective": "Acquisition", "buy_type": "Biddable", "campaign_name": "C",
         "distribution_id": dist, "version_number": ver,
+        "audience_names": auds if auds is not None else [],
+        "placements": placements if placements is not None else [],
     }
 
 
-def _traf_row(dist=None, ver=None, frame: str = "1080x1920", show: str = "REALHOUS") -> dict:
+def _traf_row(dist=None, ver=None, frame: str = "1080x1920", show: str = "REALHOUS",
+              start=date(2025, 11, 24), end=date(2026, 6, 30), flag: str = "All Clear") -> dict:
     return {
         "distribution_id": dist, "version_number": ver, "frame_size": frame,
-        "asset_type": "Video", "flight_start_date": date(2025, 11, 24),
-        "flight_end_date": date(2026, 6, 30), "flight_window_flag": "All Clear",
+        "asset_type": "Video", "flight_start_date": start,
+        "flight_end_date": end, "flight_window_flag": flag,
         "trafficking_status": "Live", "confirmed_paused": False, "offer": None,
         "show_name": show, "genre": "Reality",
     }
@@ -272,3 +275,42 @@ def test_trafficking_disabled_when_table_blank() -> None:
     ads = client.get_ads("C22848672", CAMPAIGN)
     assert mock_bq.query.call_count == 1
     assert "trafficking" not in ads[0]
+
+
+# --- Lever 1: ad-set aggregation (audiences / placements / flight dates) ----
+
+
+def test_get_ad_sets_aggregates_audiences_placements_and_flight() -> None:
+    perf = [
+        _perf_row("cr1", dist="231270", adset="as1", auds=["Broad", "SubscriberLAL"], placements=["Stories"]),
+        _perf_row("cr2", dist="253713", adset="as1", auds=["SubscriberLAL"], placements=["Reels"]),
+    ]
+    traf = [
+        _traf_row(dist="231270", start=date(2025, 11, 24), end=date(2026, 6, 30)),
+        _traf_row(dist="253713", start=date(2026, 1, 1), end=date(2026, 12, 31)),
+    ]
+    adsets = _client_traf(perf, traf).get_ad_sets("C22848672", CAMPAIGN)
+    assert len(adsets) == 1
+    a = adsets[0]
+    # audiences shaped onto targeting.custom_audiences (union across creatives)
+    assert set(a["targeting"]["custom_audiences"]) == {"Broad", "SubscriberLAL"}
+    # placements union
+    assert set(a["placements"]) == {"Stories", "Reels"}
+    # flight window: earliest start, latest end (ISO strings sort chronologically)
+    assert a["start_time"] == "2025-11-24"
+    assert a["end_time"] == "2026-12-31"
+
+
+def test_get_ad_sets_no_audience_data_leaves_targeting_unset() -> None:
+    """No audience data anywhere -> don't shape custom_audiences (so the presence
+    check Reviews 'not synced' instead of falsely Fixing a builder 'Yes')."""
+    perf = [_perf_row("cr1", dist="231270", auds=[], placements=["Stories"])]
+    adsets = _client_traf(perf, [_traf_row(dist="231270")]).get_ad_sets("C22848672", CAMPAIGN)
+    assert "targeting" not in adsets[0]
+
+
+def test_get_ads_attaches_audiences_and_placements() -> None:
+    perf = [_perf_row("cr1", dist="231270", auds=["Broad"], placements=["Reels", "Stories"])]
+    ads = _client_traf(perf, [_traf_row(dist="231270")]).get_ads("C22848672", CAMPAIGN)
+    assert ads[0]["audience_names"] == ["Broad"]
+    assert ads[0]["placements"] == ["Reels", "Stories"]

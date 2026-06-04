@@ -33,6 +33,9 @@ ALWAYS_RUN_CHECK_IDS: frozenset[str] = frozenset(
         "adset_spend_maximum",
         "adset_audiences",
         "adset_audience_exclusions",
+        # Peacock QC surface — no builder-entered expectation, so run it even on a
+        # blank cell to surface the trafficked flight-window flag.
+        "ad_flight_window",
     }
 )
 

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import UTC
+
 from app.checks.meta_checks import (
     check_ad_call_to_action,
     check_ad_count,
     check_ad_creative_dimensions,
     check_ad_destination_url,
+    check_ad_flight_window,
     check_ad_status,
     check_adset_age_max,
     check_adset_age_min,
@@ -15,11 +18,12 @@ from app.checks.meta_checks import (
     check_adset_audiences,
     check_adset_conversion_event,
     check_adset_countries,
-    check_adset_optimization_goal,
-    check_adset_spend_maximum,
-    check_adset_spend_minimum,
     check_adset_end_date,
     check_adset_genders,
+    check_adset_optimization_goal,
+    check_adset_placements,
+    check_adset_spend_maximum,
+    check_adset_spend_minimum,
     check_adset_start_date,
     check_adset_status,
     check_campaign_bid_strategy,
@@ -323,10 +327,10 @@ def test_status_unrecognized_expected_is_review() -> None:
 
 
 def test_start_date_match_datetime_actual_passes() -> None:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     row = _row("campaign_start_date", "10/05/2024")
-    actual = datetime(2024, 10, 5, 12, 30, 0, tzinfo=timezone.utc)
+    actual = datetime(2024, 10, 5, 12, 30, 0, tzinfo=UTC)
     result = check_campaign_start_date(row, evidence=_evidence({"start_time": actual}))
     assert result.verdict == "Pass"
 
@@ -1595,3 +1599,106 @@ def test_dimensions_peacock_unparseable_actual_is_review() -> None:
         row, evidence=_peacock_dim_evidence(["weird-value"])
     )
     assert result.verdict == "Review"
+
+
+# --- adset_audiences via Peacock adapter-shaping (Lever 1) ------------------
+
+
+def test_audiences_peacock_shaped_present_and_expected_passes() -> None:
+    ev = _adset_evidence([{"name": "as1", "targeting": {"custom_audiences": ["Broad", "SubscriberLAL"]}}])
+    assert check_adset_audiences(_row("adset_audiences", "Yes"), evidence=ev).verdict == "Pass"
+
+
+def test_audiences_peacock_present_but_not_expected_is_review() -> None:
+    ev = _adset_evidence([{"name": "as1", "targeting": {"custom_audiences": ["Broad"]}}])
+    assert check_adset_audiences(_row("adset_audiences", "No"), evidence=ev).verdict == "Review"
+
+
+def test_audiences_peacock_synced_empty_and_expected_is_fix() -> None:
+    # Synced (column present) but empty + builder Yes -> Fix (expected, none present).
+    ev = _adset_evidence([{"name": "as1", "targeting": {"custom_audiences": []}}])
+    assert check_adset_audiences(_row("adset_audiences", "Yes"), evidence=ev).verdict == "Fix"
+
+
+# --- adset_placements (Lever 1) --------------------------------------------
+
+
+def test_placements_exact_match_passes() -> None:
+    ev = _adset_evidence([{"name": "as1", "placements": ["Stories", "Reels", "In-Feed"]}])
+    assert check_adset_placements(_row("adset_placements", "Stories, Reels, In-Feed"), evidence=ev).verdict == "Pass"
+
+
+def test_placements_normalizes_spaces_and_hyphens() -> None:
+    ev = _adset_evidence([{"name": "as1", "placements": ["Stories", "In-Feed"]}])
+    assert check_adset_placements(_row("adset_placements", "stories, in feed"), evidence=ev).verdict == "Pass"
+
+
+def test_placements_mismatch_is_review_not_fix() -> None:
+    ev = _adset_evidence([{"name": "as1", "placements": ["Stories", "Reels"]}])
+    assert check_adset_placements(_row("adset_placements", "Stories"), evidence=ev).verdict == "Review"
+
+
+def test_placements_no_data_is_review() -> None:
+    ev = _adset_evidence([{"name": "as1"}])
+    assert check_adset_placements(_row("adset_placements", "Stories"), evidence=ev).verdict == "Review"
+
+
+# --- ad_flight_window QC surface (Lever 1) ---------------------------------
+
+
+def _flight_evidence(flags: list[str | None], peacock: bool = True) -> dict:
+    ads: list[dict] = []
+    for i, f in enumerate(flags):
+        ad: dict = {"id": f"cr{i}"}
+        if f is not None:
+            ad["trafficking"] = {"flight_window_flag": f}
+        ads.append(ad)
+    ev = {"campaign": {}, "ad_sets": [], "ads": ads}
+    if peacock:
+        ev["peacock_mode"] = True
+    return ev
+
+
+def test_flight_window_all_clear_passes() -> None:
+    ev = _flight_evidence(["🚦 All Clear: Live within Flight Window 🚦"])
+    assert check_ad_flight_window(_row("ad_flight_window", ""), evidence=ev).verdict == "Pass"
+
+
+def test_flight_window_caution_is_review() -> None:
+    ev = _flight_evidence(["🚦 All Clear: Live within Flight Window 🚦", "‼️ Caution: Approaching End Date ‼️"])
+    result = check_ad_flight_window(_row("ad_flight_window", ""), evidence=ev)
+    assert result.verdict == "Review"
+    assert "Caution" in result.action
+
+
+def test_flight_window_no_flag_is_review() -> None:
+    ev = _flight_evidence([None, None])
+    assert check_ad_flight_window(_row("ad_flight_window", ""), evidence=ev).verdict == "Review"
+
+
+def test_flight_window_non_peacock_is_review() -> None:
+    ev = _flight_evidence(["🚦 All Clear 🚦"], peacock=False)
+    assert check_ad_flight_window(_row("ad_flight_window", ""), evidence=ev).verdict == "Review"
+
+
+# --- flight dates: Peacock = Review-on-mismatch (never a false Fix) ---------
+
+
+def _peacock_date_ev(start_time: str) -> dict:
+    return {"campaign": {}, "ad_sets": [{"name": "as1", "start_time": start_time}], "ads": [], "peacock_mode": True}
+
+
+def test_adset_start_date_peacock_mismatch_is_review_not_fix() -> None:
+    ev = _peacock_date_ev("2025-11-24")
+    assert check_adset_start_date(_row("adset_start_date", "06/01/2026"), evidence=ev).verdict == "Review"
+
+
+def test_adset_start_date_peacock_match_passes() -> None:
+    ev = _peacock_date_ev("2025-11-24")
+    assert check_adset_start_date(_row("adset_start_date", "2025-11-24"), evidence=ev).verdict == "Pass"
+
+
+def test_adset_start_date_standard_mismatch_still_fixes() -> None:
+    # Non-Peacock keeps the confident Fix on a date mismatch.
+    ev = {"campaign": {}, "ad_sets": [{"name": "as1", "start_time": "2025-11-24"}], "ads": []}
+    assert check_adset_start_date(_row("adset_start_date", "06/01/2026"), evidence=ev).verdict == "Fix"
