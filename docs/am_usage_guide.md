@@ -8,7 +8,11 @@ It is meant to replace the manual line-by-line QA.
 > your live QA sheet.
 
 ## 1. Set up your QA sheet (do this first)
-1. **Make a copy** of the QA template (File > Make a copy). _[TODO Jack: template link]_
+1. **Make a copy** of the QA template (open it, then File > Make a copy):
+   `https://docs.google.com/spreadsheets/d/1rTfqYA3xjvQyHwnsEj9c9gF_exzjvIz1Aq6Sbwe1TSQ/edit`
+   > ⚠️ Work only in **your copy**. **Never paste the template link above as your
+   > `Sheet_url`** — always use your own copy's link, so the bot writes to your
+   > sheet and not the shared template.
 2. **Share the copy with the bot**, as **Editor**:
    ```
    ppc-qa-buddy@prj-prd-ai-ppc-qa-pkph.iam.gserviceaccount.com
