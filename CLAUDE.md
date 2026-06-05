@@ -348,3 +348,32 @@ Deployed test worker URL: `https://qa-buddy-worker-social-test-637315940254.us-w
 ## Repo housekeeping
 
 This file lives at the Social repo root (`/Users/jack.fay/paid-social-qa-buddy/CLAUDE.md`) and is committed, so it travels with the code. A stale earlier copy exists at `/Users/jack.fay/Paid Social QA Buddy Bot/CLAUDE.md` (the old working dir) — the repo copy is canonical. Before MVP: transfer the repo from personal `jackfay2` to the Wpromote org so the team has access.
+
+## AM beta state (handoff — as of 2026-06-05)
+
+Deployed test worker rev: **`00026-2dr`** (naming legacy-Yes/No guard). URL `https://qa-buddy-worker-social-test-637315940254.us-west1.run.app`.
+
+### Which QA sheet is which (resolves the recurring "which template?" confusion)
+
+There is **no single magic "standard template."** Several sheets exist and they are NOT interchangeable:
+
+| Sheet | ID | check_ids | Role |
+|---|---|---|---|
+| **MASTER (Carrie's)** | `12CMnQyqwgmKwGaujE5Hu64sswvlDfFT5Cs-JEJNtF4Y` | **0** | Human-facing template. **Bot-broken** — col A (Check_ID) is empty, so a fresh copy parses 0 rows and returns all-zeros. **DO-NOT-WRITE.** |
+| **Distribution template (AM source)** | `1rTfqYA3xjvQyHwnsEj9c9gF_exzjvIz1Aq6Sbwe1TSQ` | 27 | Jack's copy of the master, **fixed**: check_ids copied from the Peacock demo (structures align row-for-row). **This is the sheet AMs copy from.** `docs/am_usage_guide.md` points here. |
+| Peacock demo | `1KWkUIDr6gp8LfCSMHYHqG1VltEUyKBWySDtHcgAt9V4` | 27 | A *filled* Peacock example. Not a template. |
+| Standard demo | `1b8hp0UFjLyMgJs4G5inNME3Vyg4Cn9Etq7kjIitt4c8` | 26 | A *filled* standard example (C61854560 / campaign 6257219750556). Not a template. |
+| Standard demo "IBD" (`1ORSm…`) | referenced in old notes; full ID unknown (truncated key 404s) | ? | Get full ID if needed. |
+
+**Why the demos work but a fresh master copy does not:** the demos (IBD, Peacock) had check_ids added separately when they were built. The master never had them. So **the demos are filled EXAMPLES, not the template** — that is the source of the confusion. The bot keys off `check_id` (col A); no check_ids means nothing to run.
+
+**The one rule:** for AMs, the right sheet is the **distribution template `1rTfqYA3`** (copy, fill col E, share with the SA, run against the copy). **Long-term fix:** ask Carrie to add the Check_ID column to the master `12CMn`; until then we maintain check_ids on `1rTfqYA3`.
+
+### AM beta — remaining before sending to AMs
+- **AM usage guide:** `docs/am_usage_guide.md`. Blanks: #1 template link = **done** (`1rTfqYA3`). #2 AM Slack channel = **pending** (note: the bot's test Slack app lives in a separate "Testing Environment" workspace, so resolve which channel AMs use before sending). #3 feedback channel = **pending** (not set up yet).
+- **Share with AMs:** distribution template `1rTfqYA3` as **View**; the SA `ppc-qa-buddy@prj-prd-ai-ppc-qa-pkph.iam.gserviceaccount.com` as **Editor**.
+- **Fresh AM test account** (untested, fully creatived): account_id `10153727215788875`, campaign_id `6290354748941` (client C65983727, "facebook_so_wp_ff_boosted-traffic-RESET", 119 ads all with creative).
+
+### Offered but NOT yet built (both recommended for the beta)
+1. **0-check-rows produces a clear Slack message** instead of a silent `Pass 0 | Fix 0 | Review 0 | N/A 0 | Error 0`. This is what made the master-copy failure mysterious.
+2. **Bot guard that refuses to write to the master `12CMn`** (defense-in-depth for the do-not-write rule).
