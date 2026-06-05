@@ -353,6 +353,8 @@ This file lives at the Social repo root (`/Users/jack.fay/paid-social-qa-buddy/C
 
 Deployed test worker rev: **`00026-2dr`** (naming legacy-Yes/No guard). URL `https://qa-buddy-worker-social-test-637315940254.us-west1.run.app`.
 
+**Live Slack self-test PASSED 2026-06-05.** Jack ran `@Social QA Test` (test workspace) against account `10153727215788875` / campaign `6290354748941` (standard, client C65983727, "facebook_so_wp_ff_boosted-traffic-RESET") and got `Pass 10 | Fix 1 | Review 7 | N/A 9 | Error 0` — byte-identical to the local orchestration run. Confirms the full listener → Cloud Tasks → worker → BigQuery → sheet → Slack loop, deterministic Gemini in prod (temperature=0 holding), and the all-zeros bug fully fixed. The one Fix is a real catch (ad-set start date: 2 of 4 ad sets are a "Jan 2023 RESET" starting 2023-01-09, not the entered 2022-08-17). Spelling ran via Gemini with a 25-ad cap (note surfaced in-cell). Distribution template `1rTfqYA3` was reset to pristine afterward (inputs restored, verdicts cleared).
+
 ### Which QA sheet is which (resolves the recurring "which template?" confusion)
 
 There is **no single magic "standard template."** Several sheets exist and they are NOT interchangeable:
