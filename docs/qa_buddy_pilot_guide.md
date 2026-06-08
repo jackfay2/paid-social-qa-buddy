@@ -201,7 +201,7 @@ If you are stuck, post in the channel with your campaign ID and a screenshot.
 ## Feedback (the reason for the pilot)
 
 Found a verdict that looks wrong, or something confusing? Tell us in
-`[TODO: feedback method]` with the **campaign ID** and a **screenshot**. The
+this channel (the same place you run the bot) with the **campaign ID** and a **screenshot**. The
 single most useful thing you can send is "this Fix or Review was wrong, here's
 why", that is exactly what helps us tune it.
 
