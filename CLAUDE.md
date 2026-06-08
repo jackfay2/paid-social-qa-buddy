@@ -376,6 +376,6 @@ There is **no single magic "standard template."** Several sheets exist and they 
 - **Share with AMs:** distribution template `1rTfqYA3` as **View**; the SA `ppc-qa-buddy@prj-prd-ai-ppc-qa-pkph.iam.gserviceaccount.com` as **Editor**.
 - **Fresh AM test account** (untested, fully creatived): account_id `10153727215788875`, campaign_id `6290354748941` (client C65983727, "facebook_so_wp_ff_boosted-traffic-RESET", 119 ads all with creative).
 
-### Offered but NOT yet built (both recommended for the beta)
-1. **0-check-rows produces a clear Slack message** instead of a silent `Pass 0 | Fix 0 | Review 0 | N/A 0 | Error 0`. This is what made the master-copy failure mysterious.
-2. **Bot guard that refuses to write to the master `12CMn`** (defense-in-depth for the do-not-write rule).
+### Pilot safety nets
+1. **DONE (2026-06-08, commit `e5a01f8`, pending next worker deploy):** a sheet with no parseable check rows now returns a clear "couldn't find any checks, did you copy the template?" reject (`error_code=no_check_rows`) instead of the silent all-zeros. Short-circuits in `orchestration._execute` before any sheet write; the worker already posts reject messages to Slack. Covered by `test_no_check_rows_rejects_with_clear_message` in `tests/test_orchestration.py`.
+2. **Still open (recommended):** bot guard that refuses to write to the master `12CMn` (defense-in-depth for the do-not-write rule).
