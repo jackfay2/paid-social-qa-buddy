@@ -122,6 +122,21 @@ def test_happy_path_writes_results_once() -> None:
     sheet.write_results.assert_called_once()
 
 
+def test_no_check_rows_rejects_with_clear_message() -> None:
+    """A sheet with no check IDs (not copied from the template) must produce a
+    clear, actionable message instead of a silent all-zeros 'completed' run, and
+    must not write anything back to the sheet."""
+    service, _store, _resolver, _meta, sheet = _make_service(rows=[])
+    result = service.run(_request())
+
+    assert result.status == "rejected"
+    assert result.error_code == "no_check_rows"
+    assert "couldn't find any checks" in result.message
+    assert "copy" in result.message.lower()  # points them at the template
+    assert sum(result.summary_counts.values()) == 0
+    sheet.write_results.assert_not_called()
+
+
 def test_happy_path_persists_completed_record() -> None:
     service, store, *_ = _make_service()
     result = service.run(_request())

@@ -227,6 +227,24 @@ class SocialQAOrchestrationService:
                 record, f"Failed to read the QA sheet: {exc}", "sheet_read_failed"
             )
 
+        # 5b. No checks to run. Almost always a sheet that wasn't copied from the
+        # QA template (column A has no check IDs). Stop here with a clear,
+        # actionable message instead of writing an all-zeros summary that reads
+        # like a silent failure (the exact confusion this guards against).
+        if not rows:
+            return self._reject(
+                record,
+                (
+                    "I opened the sheet but couldn't find any checks to run "
+                    "(no check IDs in column A of the first tab). This almost "
+                    "always means the sheet wasn't made from the QA template. "
+                    "Make a fresh copy of the template, fill in your expected "
+                    "values, and run it again. If you did copy the template and "
+                    "still hit this, post in the channel and we'll take a look."
+                ),
+                "no_check_rows",
+            )
+
         # 6. Run deterministic checks.
         results = execute_checks(rows, self.check_runner, evidence=evidence)
 
