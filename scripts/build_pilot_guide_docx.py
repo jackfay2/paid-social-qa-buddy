@@ -41,7 +41,7 @@ def add_inline(p, text, mono=False, base_bold=False):
         if seg.startswith("**") and seg.endswith("**"):
             bold, t = True, seg[2:-2]
         elif seg.startswith("`") and seg.endswith("`"):
-            m, t = True, seg[1:-1]
+            t = seg[1:-1]  # render literals as normal prose, not monospace
         elif seg.startswith("*") and seg.endswith("*"):
             italic, t = True, seg[1:-1]
         run = p.add_run(t)
@@ -95,14 +95,16 @@ def main():
                 code.append(lines[i])
                 i += 1
             i += 1
+            # Render fenced blocks (the Slack template, the service-account email)
+            # as a clean light callout box in the normal proportional font, NOT a
+            # monospace terminal block.
             p = doc.add_paragraph()
-            shade(p._p.get_or_add_pPr(), "F2F2F2")
+            p.paragraph_format.left_indent = Inches(0.3)
+            shade(p._p.get_or_add_pPr(), "F4F6F8")
             for j, cl in enumerate(code):
                 if j > 0:
                     p.add_run().add_break()
                 r = p.add_run(cl)
-                r.font.name = "Consolas"
-                r.font.size = Pt(10)
                 if "TODO" in cl:
                     r.font.highlight_color = WD_COLOR_INDEX.YELLOW
             continue
