@@ -376,6 +376,18 @@ There is **no single magic "standard template."** Several sheets exist and they 
 - **Share with AMs:** distribution template `1rTfqYA3` as **View**; the SA `ppc-qa-buddy@prj-prd-ai-ppc-qa-pkph.iam.gserviceaccount.com` as **Editor**.
 - **Fresh AM test account** (untested, fully creatived): account_id `10153727215788875`, campaign_id `6290354748941` (client C65983727, "facebook_so_wp_ff_boosted-traffic-RESET", 119 ads all with creative).
 
+### Pilot clients (Avara + Spindrift) — validated in-memory 2026-06-12
+- **Shop Avara** `C73556393`, account `433162067600511`. Good test campaign: `120233923140570101` ("WP_FF_ASC_CollectionLaunch", ACTIVE). Preview (expected=actual): `Pass 11 | Fix 1 | Review 4 | N/A 11 | Error 0`.
+- **Spindrift** `C52559738`, account `278276847032430`. Good test campaign: `23850238924590294` ("WP_PR_R_LAL_NewMarkets", paused). Preview: `Pass 9 | Fix 1 | Review 5 | N/A 12 | Error 0`. Note: this Reach campaign's ads have no copy text synced, so the 3 spelling checks return Review ("no ad text") — varies by campaign, not a bug.
+- Both: 0 errors, and the synced settings (optimization goal, spend floor/cap) come back **Pass**, not Review, confirming the coverage read. The one Fix in each is a real catch (an ad set with a different start date). The pilot is 5 AMs (group chat); their campaign data requested, Aditi's lands Monday.
+
+### Wpromote pilot cutover — runbook at `docs/wpromote_pilot_cutover_runbook.md`
+Moving from the test workspace to a Wpromote channel only swaps **Slack-app config**; the Cloud Tasks/OIDC/worker/BigQuery plumbing is untouched. Non-obvious gotchas the runbook captures, found 2026-06-12 from the live listener config:
+- Listener has a **channel allowlist** `SOCIAL_CHANNEL_IDS` (currently `C0B6ASW9R9V` only) — the bot only answers in that channel. The Wpromote channel ID must be added, or it stays silent. (Dress rehearsals must run in `C0B6ASW9R9V`.)
+- App-specific **`SLACK_BOT_USER_ID`** (`U0B71RZQU4X`) — a new app = new bot user id; must be updated or the listener won't recognize mentions.
+- Both listener **and** worker need the new app's `SLACK_BOT_TOKEN` (a token only posts in its own workspace).
+- Full cutover: the test workspace stops once tokens change. Rehearse first, then cut over.
+
 ### Pilot safety nets
 1. **DONE + DEPLOYED to test rev `00027-hc9` (commit `e5a01f8`, /readyz 200 verified):** a sheet with no parseable check rows now returns a clear "couldn't find any checks, did you copy the template?" reject (`error_code=no_check_rows`) instead of the silent all-zeros. Short-circuits in `orchestration._execute` before any sheet write; the worker already posts reject messages to Slack. Covered by `test_no_check_rows_rejects_with_clear_message` in `tests/test_orchestration.py`.
 2. **Still open (recommended):** bot guard that refuses to write to the master `12CMn` (defense-in-depth for the do-not-write rule).
