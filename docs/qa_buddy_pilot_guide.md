@@ -1,4 +1,4 @@
-# Paid Social QA Buddy Bot — Pilot Guide
+# Paid Social QA Buddy Bot Pilot Guide
 
 Welcome to the pilot. This guide walks you through using the QA Buddy Bot to check
 your Meta campaigns. Read it once before your first run and keep it handy for the
@@ -26,23 +26,22 @@ That is the whole loop. The rest of this guide is detail.
 
 ---
 
-## The one concept that matters: the five verdicts
+## The five verdicts
 
 Every row gets one of these. This is the bot's whole vocabulary.
 
 | Verdict | What it means | What you do |
 |---|---|---|
-| ✅ **Pass** | The campaign matches what you entered. | Nothing. |
-| 🔴 **Fix** | It does **not** match. The bot shows you the actual value it found. | Go correct the campaign (or fix your expected value if you mistyped it). |
-| 🟡 **Review** | The bot could not confirm this one automatically, so it is asking you to check it by hand. It leaves a note with whatever it does know. | Eyeball that row yourself. |
-| ⚪ **N/A** | You left that row blank, so the bot skipped it. | Nothing. Fill it in if you want it checked. |
-| ⚠️ **Error** | Something was off with that row itself (rare). | Check the row, or ask in the channel. |
+| **Pass** | The campaign matches what you entered. | Nothing. |
+| **Fix** | It does **not** match. The bot shows you the actual value it found. | Go correct the campaign (or fix your expected value if you mistyped it). |
+| **Review** | The bot could not confirm this one automatically, so it is asking you to check it by hand. It leaves a note with whatever it does know. | Eyeball that row yourself. |
+| **N/A** | You left that row blank, so the bot skipped it. | Nothing. Fill it in if you want it checked. |
+| **Error** | Something was off with that row itself (rare). | Check the row, or ask in the channel. |
 
-**The single most important thing to understand:** the bot is built to **never tell
-you something Passed when it is not sure.** When it cannot confirm a value, it
-returns **Review**, not Pass. So a Review is the bot being careful, not the bot
-failing. You will see some Reviews on every run, and that is by design (more on
-why below).
+**The key thing to know:** the bot is built to **never tell you something Passed
+when it is not sure.** When it cannot confirm a value, it returns **Review**, not
+Pass. So a Review is the bot being careful, not the bot failing. You will see some
+Reviews on every run, and that is by design (more on why below).
 
 ---
 
@@ -67,9 +66,9 @@ which ones to check by filling in the matching rows:
 **1. Make your own copy of the template.**
 Open the template, then **File > Make a copy**:
 
-`[TODO: template link — https://docs.google.com/spreadsheets/d/1rTfqYA3xjvQyHwnsEj9c9gF_exzjvIz1Aq6Sbwe1TSQ/edit]`
+`[TODO: template link: https://docs.google.com/spreadsheets/d/1rTfqYA3xjvQyHwnsEj9c9gF_exzjvIz1Aq6Sbwe1TSQ/edit]`
 
-> ⚠️ Work only in **your copy**. Never use the template link itself as your
+> Work only in **your copy**. Never use the template link itself as your
 > `Sheet_url`, always use your own copy's link, so the bot writes to your sheet
 > and not the shared template.
 
@@ -80,8 +79,8 @@ The bot needs write access to put verdicts in your sheet. Share your copy with:
 ppc-qa-buddy@prj-prd-ai-ppc-qa-pkph.iam.gserviceaccount.com
 ```
 
-This is the single most common thing people forget. If you skip it, the bot will
-tell you to share the sheet and stop. It will not guess.
+This is the thing people forget most often. If you skip it, the bot will tell you
+to share the sheet and stop. It will not guess.
 
 ---
 
@@ -160,8 +159,8 @@ confusion:
   conversion event, optimization goal, attribution, spend caps, and audiences are
   not yet synced into our data for every client. Those rows return **Review with a
   note**, not because anything is wrong, but because the bot will not guess. As
-  that data gets added, these turn automatic on their own. **Tip:** for your first
-  run, pick a client whose data is well-synced for the smoothest experience.
+  that data gets added, these turn automatic on their own. For your first run, pick
+  a client whose data is well-synced for the smoothest experience.
 - **Spelling is AI-checked on up to the first 25 ads.** If your campaign has more,
   the bot tells you in the note to eyeball the rest. This keeps the run fast.
 - **A couple of checks are manual on purpose** (for example, confirming the actual
@@ -200,10 +199,10 @@ If you are stuck, post in the channel with your campaign ID and a screenshot.
 
 ## Feedback (the reason for the pilot)
 
-Found a verdict that looks wrong, or something confusing? Tell us in
-this channel (the same place you run the bot) with the **campaign ID** and a **screenshot**. The
-single most useful thing you can send is "this Fix or Review was wrong, here's
-why", that is exactly what helps us tune it.
+Found a verdict that looks wrong, or something confusing? Tell us in this channel
+(the same place you run the bot) with the **campaign ID** and a **screenshot**.
+What helps us most is a clear "this Fix or Review was wrong, and here's why." That
+is the kind of thing that lets us tune it.
 
 ---
 
@@ -212,5 +211,5 @@ why", that is exactly what helps us tune it.
 - **Template to copy:** `[TODO: template link]`
 - **Share your copy with (Editor):** `ppc-qa-buddy@prj-prd-ai-ppc-qa-pkph.iam.gserviceaccount.com`
 - **Run it:** `[TODO: bot handle]` + `Account_id:` + `Campaign_id:` + `Sheet_url:` (one per line)
-- **Verdicts:** Pass = matches · Fix = does not match · Review = check by hand · N/A = left blank · Error = bad row
+- **Verdicts:** Pass = matches, Fix = does not match, Review = check by hand, N/A = left blank, Error = bad row
 - **Golden rule:** the bot never auto-Passes when unsure. A Review means "look at this," not "it failed."
