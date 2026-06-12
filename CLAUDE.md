@@ -351,7 +351,7 @@ This file lives at the Social repo root (`/Users/jack.fay/paid-social-qa-buddy/C
 
 ## AM beta state (handoff — as of 2026-06-05)
 
-Deployed test worker rev: **`00026-2dr`** (naming legacy-Yes/No guard). URL `https://qa-buddy-worker-social-test-637315940254.us-west1.run.app`.
+Deployed test worker rev: **`00027-hc9`** (empty-sheet safety net, 2026-06-12; prior `00026-2dr` = naming legacy-Yes/No guard). URL `https://qa-buddy-worker-social-test-637315940254.us-west1.run.app`. /readyz 200 verified post-deploy.
 
 **Live Slack self-test PASSED 2026-06-05.** Jack ran `@Social QA Test` (test workspace) against account `10153727215788875` / campaign `6290354748941` (standard, client C65983727, "facebook_so_wp_ff_boosted-traffic-RESET") and got `Pass 10 | Fix 1 | Review 7 | N/A 9 | Error 0` — byte-identical to the local orchestration run. Confirms the full listener → Cloud Tasks → worker → BigQuery → sheet → Slack loop, deterministic Gemini in prod (temperature=0 holding), and the all-zeros bug fully fixed. The one Fix is a real catch (ad-set start date: 2 of 4 ad sets are a "Jan 2023 RESET" starting 2023-01-09, not the entered 2022-08-17). Spelling ran via Gemini with a 25-ad cap (note surfaced in-cell). Distribution template `1rTfqYA3` was reset to pristine afterward (inputs restored, verdicts cleared).
 
@@ -377,5 +377,5 @@ There is **no single magic "standard template."** Several sheets exist and they 
 - **Fresh AM test account** (untested, fully creatived): account_id `10153727215788875`, campaign_id `6290354748941` (client C65983727, "facebook_so_wp_ff_boosted-traffic-RESET", 119 ads all with creative).
 
 ### Pilot safety nets
-1. **DONE (2026-06-08, commit `e5a01f8`, pending next worker deploy):** a sheet with no parseable check rows now returns a clear "couldn't find any checks, did you copy the template?" reject (`error_code=no_check_rows`) instead of the silent all-zeros. Short-circuits in `orchestration._execute` before any sheet write; the worker already posts reject messages to Slack. Covered by `test_no_check_rows_rejects_with_clear_message` in `tests/test_orchestration.py`.
+1. **DONE + DEPLOYED to test rev `00027-hc9` (commit `e5a01f8`, /readyz 200 verified):** a sheet with no parseable check rows now returns a clear "couldn't find any checks, did you copy the template?" reject (`error_code=no_check_rows`) instead of the silent all-zeros. Short-circuits in `orchestration._execute` before any sheet write; the worker already posts reject messages to Slack. Covered by `test_no_check_rows_rejects_with_clear_message` in `tests/test_orchestration.py`.
 2. **Still open (recommended):** bot guard that refuses to write to the master `12CMn` (defense-in-depth for the do-not-write rule).
